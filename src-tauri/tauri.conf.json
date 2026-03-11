@@ -10,8 +10,8 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "visual-contextualizer",
-        "width": 800,
+        "title": "Visual Contextualizer",
+        "width": 400,
         "height": 600
       }
     ],

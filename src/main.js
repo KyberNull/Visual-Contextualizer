@@ -16,3 +16,10 @@ window.addEventListener("DOMContentLoaded", () => {
     greet();
   });
 });
+const darkThemeButton = document.querySelector(".dark_mode");
+
+if (darkThemeButton) {
+  darkThemeButton.addEventListener("click", () => {
+    document.body.classList.toggle("dark-theme");
+  });
+}
