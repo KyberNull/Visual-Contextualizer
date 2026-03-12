@@ -12,9 +12,7 @@
     <div class="topbar">
             <div class="settings">
         <div class="settings_image_container">
-          <div class="settings_image">
-              Settings
-          </div>
+          <div class="settings_image">Settings</div>
         </div>
       </div>
       <div class="dark_mode">
@@ -23,10 +21,17 @@
         </div>
       </div>
     </div>
+    
     <div class="main_ui">
-      <div class="text_box">Hellow</div>
-      <div class="image_button">
-        <input type="file" id="file_input" accept="image/png, image/jpeg" style="display: none;">Click to Upload Image</div>
+      <div id="result_container" class="output_box">
+        <p id="model_output_text">Initializing Model</p>
+      </div>
+      <div class="loader" id="status_spinner" style="display: none;"></div>
     </div>
+
+    <div class="image_button">
+      <input type="file" id="file_input" accept="image/png, image/jpeg" style="display: none;">Click to Upload Image</div>
+    </div>
+
   </body>
 </html>
