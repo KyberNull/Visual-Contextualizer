@@ -1,10 +1,5 @@
-const { register } = require("@tauri-apps/plugin-global-shortcut");
 const { invoke } = window.__TAURI__.core;
-
-await register('CommandOrControl+Shift+C', ()=> {
-  alert("Shortcut detected !!");
-});
-
+const { register } = window.__TAURI__.globalShortcut;
 
 async function handleImageUploadToRust(file)
 {
@@ -34,6 +29,13 @@ async function handleImageUploadToRust(file)
 
 
 window.addEventListener("DOMContentLoaded", async() => {
+
+  await register('CommandOrControl+Shift+N', (event) => {
+    if(event.state == "Pressed"){
+      console.log('Shortcut triggered');
+    }
+  });
+
   const darkThemeButton = document.querySelector(".dark_mode_container");
   const darkThemeImage = document.querySelector(".dark_mode_image");
 

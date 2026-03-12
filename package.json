@@ -7,9 +7,14 @@
     "tauri": "tauri"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "@types/bun": "latest"
   },
   "dependencies": {
     "@tauri-apps/plugin-global-shortcut": "~2"
+  },
+  "module": "index.ts",
+  "peerDependencies": {
+    "typescript": "^5"
   }
 }
