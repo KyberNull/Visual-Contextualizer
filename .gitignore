@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Model Files
+Qwen3.5-0.8B-GGUF/
