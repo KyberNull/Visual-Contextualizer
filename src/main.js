@@ -3,23 +3,21 @@ const { invoke } = window.__TAURI__.core;
 let greetInputEl;
 let greetMsgEl;
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsgEl.textContent = await invoke("greet", { name: greetInputEl.value });
-}
-
 window.addEventListener("DOMContentLoaded", () => {
-  greetInputEl = document.querySelector("#greet-input");
-  greetMsgEl = document.querySelector("#greet-msg");
-  document.querySelector("#greet-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    greet();
-  });
-});
-const darkThemeButton = document.querySelector(".dark_mode");
+  const darkThemeButton = document.querySelector(".dark_mode_container");
+  const darkThemeImage = document.querySelector(".dark_mode_image");
 
-if (darkThemeButton) {
-  darkThemeButton.addEventListener("click", () => {
-    document.body.classList.toggle("dark-theme");
-  });
-}
+  if (darkThemeButton && darkThemeImage) {
+    darkThemeButton.addEventListener("click", () => {
+      const isDark = document.body.classList.toggle("dark-theme");
+      
+      darkThemeImage.textContent = isDark ? "Light" : "Dark";
+    });
+  }
+  const uploadBtn = document.querySelector(".image_button");
+  const fileInput = document.querySelector("#file_input");
+  
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener("click", () => fileInput.click());
+  }
+});

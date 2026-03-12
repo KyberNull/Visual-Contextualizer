@@ -1,49 +1,85 @@
-.image_button{
-  background-color: #00BFA5;
-  color: #F5F5F5;
-  padding: 5px 10px;
-  border-radius: 20px;
-  font-size: 30px;
-  text-align: center;
-  justify-content: center;
-
-}
-
-.main_ui{
-  position: fixed;
-  bottom: 30px;
-}
-
-.topbar{
-  display: flex;
-  align-items: flex-end;
-}
-
-.dark_mode_container{
-  background-color: rgb(58, 55, 55);
-
-  width: 50px;
-  border-radius: 20px;
-  padding: 10px 10px;
-  font-size: 20px;
-  text-align: center;
-  margin: 5px;
-  color: white;
-
-}
-
-.settings_image_container{
-  background-color: rgb(52, 52, 55);
-  width: 90px;
-  border-radius: 20px;
-  padding: 10px 10px;
-  font-size: 20px;
-  text-align: center;
-  margin: 5px;
-  color: white;
+:root {
+  /* Light Mode Colors */
+  --bg-color: #f8f9fa;
+  --text-color: #212529;
+  --card-bg: #ffffff;
+  --accent-color: #00bfa5;
+  --secondary-bg: #e9ecef;
+  --button-text: #ffffff;
+  --transition: all 0.3s ease;
 }
 
 body.dark-theme {
-  background-color: #111;
-  color: #f5f5f5;
+  /* Dark Mode Colors */
+  --bg-color: #121212;
+  --text-color: #e0e0e0;
+  --card-bg: #1e1e1e;
+  --secondary-bg: #2d2d2d;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  font-family: 'Inter', -apple-system, sans-serif;
+  margin: 0;
+  transition: var(--transition);
+}
+
+/* Layout */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: var(--card-bg);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+.settings_image_container, .dark_mode_container {
+  background-color: var(--secondary-bg);
+  padding: 8px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dark_mode_container:hover {
+  filter: brightness(1.1);
+}
+
+.main_ui {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px;
+  gap: 20px;
+}
+
+.text_box {
+  background-color: var(--card-bg);
+  width: 80%;
+  max-width: 600px;
+  height: 300px;
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid var(--secondary-bg);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+.image_button {
+  background-color: var(--accent-color);
+  color: var(--button-text);
+  padding: 12px 24px;
+  border-radius: 50px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.image_button:active {
+  transform: scale(0.95);
 }
