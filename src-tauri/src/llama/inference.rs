@@ -103,7 +103,9 @@ impl LlamaPipeline {
     unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
     self.reset_sampler(cfg);
 
-    let prompt_tokens = self.model.tokenize(prompt, true)?;
+    
+    let prompt = self.model.apply_chat_template(prompt)?;
+    let prompt_tokens = self.model.tokenize(&prompt, true)?;
     if prompt_tokens.is_empty() {
         return Err("Prompt tokenization produced no tokens".to_string());
     }
