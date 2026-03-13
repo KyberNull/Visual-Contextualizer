@@ -103,7 +103,7 @@ impl LlamaPipeline {
     unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
     self.reset_sampler(cfg);
 
-    let mut prompt_tokens = self.model.tokenize(prompt, true)?;
+    let prompt_tokens = self.model.tokenize(prompt, true)?;
     if prompt_tokens.is_empty() {
         return Err("Prompt tokenization produced no tokens".to_string());
     }
@@ -111,8 +111,13 @@ impl LlamaPipeline {
     let n_prompt = prompt_tokens.len();
     let eos = self.model.eos_token();
 
+
     // ---- build batch for prompt ----
+
+    //llama_batch_init allocates the memory based on the nos of tokens passed in it.
     let mut batch = unsafe { llama_batch_init(n_prompt as i32, 0, 1) };
+    //MANUALLY setting the nos of tokens to be processed.
+    batch.n_tokens = n_prompt as i32;
 
     unsafe {
         for i in 0..n_prompt {
@@ -139,11 +144,10 @@ impl LlamaPipeline {
     // ---- generation loop ----
     let mut out = String::new();
     let mut last_pos = (n_prompt - 1) as i32;
-
+    let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
     for _ in 0..cfg.max_tokens {
 
         // sample next token from logits of last position
-        let token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos) };
 
         if token == eos {
             break;
@@ -155,6 +159,7 @@ impl LlamaPipeline {
 
         // ---- decode generated token ----
         let mut batch = unsafe { llama_batch_init(1, 0, 1) };
+        batch.n_tokens = 1; // <-- Tell the batch it contains 1 token
 
         unsafe {
             *batch.token.add(0) = token;
@@ -175,6 +180,8 @@ impl LlamaPipeline {
         }
 
         last_pos += 1;
+        token = unsafe { llama_sampler_sample(self.sampler, self.ctx, 0)};
+
     }
 
     Ok(out)
