@@ -19,7 +19,7 @@ impl Default for ContextConfig {
         Self {
             n_ctx: 4096,
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
-            n_threads: 4, //TODO: make it choose the number of threads based on the system
+            n_threads: 6, //TODO: make it choose the number of threads based on the system
         }
     }
 }
@@ -79,9 +79,11 @@ impl LlamaPipeline {
         let mut cparams = unsafe { llama_context_default_params() };
         cparams.n_ctx = cfg.n_ctx;
         cparams.n_batch = cfg.n_batch;
-        cparams.n_ubatch = cfg.n_batch;
+        cparams.n_ubatch = cfg.n_batch/16;
         cparams.n_threads = cfg.n_threads;
         cparams.n_threads_batch = cfg.n_threads;
+        cparams.kv_unified = true;
+        cparams.n_seq_max = 4;
 
         let ctx = unsafe { llama_init_from_model(model.ptr, cparams) };
         if ctx.is_null() {

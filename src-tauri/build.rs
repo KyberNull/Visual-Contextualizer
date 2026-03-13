@@ -11,6 +11,9 @@ fn main() {
     let dst = cmake::Config::new("llama_cpp")
         .define("LLAMA_BUILD_TESTS", "OFF")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
+        .define("GGML_NATIVE", "ON")
+        .define("BUILD_SHARED_LIBS", "ON")
+        .profile("Release")
         .build();
 
     // Link the files
