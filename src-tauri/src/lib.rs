@@ -4,11 +4,10 @@ mod llama;
 use crate::llama::inference::{ContextConfig, GenerationConfig, LlamaPipeline, LlamaRuntime};
 use crate::llama::model::LlamaModel;
 use std::fs;
+use std::env;
 use std::sync::Mutex;
 use tauri::State;
 
-// TODO: Make it dynamic later, maybe with a file picker in the frontend. For now we can hardcode it for testing.
-const MODEL_PATH: &str = "/home/aasish/Visual Contextualizer/Qwen3.5-0.8B-GGUF/Qwen3.5-0.8B-UD-Q4_K_XL.gguf";
 
 #[tauri::command]
 fn get_img(data: Vec<u8>) -> Result<String, String> {
@@ -35,9 +34,13 @@ impl AppState {
     fn new() -> Result<Self, String> {
         let runtime = LlamaRuntime::init();
 
-        println!("Loading model from {}", MODEL_PATH);
+        //Finding model with the relative path
+        let path = env::current_dir().unwrap().join("Qwen3.5-0.8B-GGUF").join("Qwen3.5-0.8B-UD-Q4_K_XL.gguf");
+        let path_str = path.to_str().ok_or("Error")?;
 
-        let model = LlamaModel::load(MODEL_PATH)?; // Lazy loads because mmap() is on by default in llama.cpp
+        println!("Loading model from {}", path.display());
+
+        let model = LlamaModel::load(path_str)?; // Lazy loads because mmap() is on by default in llama.cpp
         let cfg = ContextConfig::default();
         let pipeline = LlamaPipeline::from_model(model, &cfg)?;
 
@@ -61,7 +64,11 @@ fn generate_text(state: State<AppState>, prompt: String) -> Result<String, Strin
 
     println!("Generating text for prompt: {}", prompt);
 
-    pipeline.generate(&prompt, &cfg)
+    let result = pipeline.generate(&prompt, &cfg);
+    match result {
+        Ok(s) => {println!("Result: {}", s); Ok(s)},
+        Err(e) => {println!("ERROR: {}", e); Err(e)}
+    }
 }
 
 // Initialise App Stae which loads llama.cpp backend and model, and creates the pipeline.

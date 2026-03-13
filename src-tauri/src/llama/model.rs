@@ -23,7 +23,10 @@ impl LlamaModel {
     }
 
     pub fn tokenize(&self, text: &str, add_special: bool) -> Result<Vec<llama_token>, String> {
+        // Create a vector of tokens with extra capacity to handle tokenization overflow
         let mut tokens = vec![0 as llama_token; text.len() + 8];
+
+        // n is the number of tokens written, or a negative value indicating overflow or error
         let mut n = unsafe {
             llama_tokenize(
                 self.vocab,
@@ -35,6 +38,8 @@ impl LlamaModel {
                 false,
             )
         };
+
+        // Handle tokenization overflow and errors based on llama.cpp specification
         if n == i32::MIN {
             return Err("Tokenization overflow".to_string());
         }
@@ -53,6 +58,8 @@ impl LlamaModel {
                 )
             };
         }
+
+        // If failed after resizing, return an error
         if n < 0 {
             return Err("Tokenization failed".to_string());
         }
@@ -64,6 +71,7 @@ impl LlamaModel {
         unsafe { llama_vocab_eos(self.vocab) }
     }
 
+    // Detokenise a token to its string representation, handling buffer resizing as needed
     pub fn token_to_piece(&self, token: llama_token) -> Result<String, String> {
         let mut buf = vec![0_i8; 32];
         loop {
@@ -88,7 +96,12 @@ impl LlamaModel {
             buf.resize(needed, 0);
         }
     }
+
 }
+
+
+
+
 
 // Implement Drop trait for memory management
 impl Drop for LlamaModel {

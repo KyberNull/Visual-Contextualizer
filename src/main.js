@@ -36,6 +36,15 @@ window.addEventListener("DOMContentLoaded", async() => {
     }
   });
 
+  try{
+    const result = await invoke("generate_text", {prompt : "Hello!!"});
+    console.log(result);
+  }
+  catch(error)
+  {
+    console.log(error);
+  }
+
   const darkThemeButton = document.querySelector(".dark_mode_container");
   const darkThemeImage = document.querySelector(".dark_mode_image");
 
