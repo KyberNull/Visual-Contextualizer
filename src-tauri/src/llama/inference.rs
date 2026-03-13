@@ -1,4 +1,5 @@
 use crate::llama::template;
+use tauri::{AppHandle, Emitter};
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
 
@@ -100,7 +101,7 @@ impl LlamaPipeline {
             sampler,
         })
     }
-    pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig) -> Result<String, String> {
+    pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig, app: AppHandle) -> Result<String, String> {
     unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
     self.reset_sampler(cfg);
     
@@ -152,6 +153,8 @@ impl LlamaPipeline {
     let mut out = String::new();
     let mut last_pos = (n_prompt - 1) as i32;
     let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
+    let mut word_buffer = String::new();
+    let mut is_thinking = false; 
     for _ in 0..cfg.max_tokens {
 
         // sample next token from logits of last position
@@ -160,7 +163,37 @@ impl LlamaPipeline {
             break;
         }
 
-        out.push_str(&self.model.token_to_piece(token)?);
+        //Streaming code for better viewed latency
+        let piece = &self.model.token_to_piece(token)?;
+        out.push_str(piece);
+        
+        // Dynamically detect thinking block initiation
+        if piece.contains("<think>") {
+            is_thinking = true;
+        }
+
+        word_buffer.push_str(&piece);
+
+        if(out.contains("</think>") && is_thinking)
+        {
+            is_thinking = false;
+            if let Some((_before, after)) = out.split_once("</think>")
+            {
+                word_buffer = after.to_string();
+            }
+        }
+        if let Some((before, after)) = word_buffer.split_once(' ')
+        {
+            if (!is_thinking){
+                while let Some((before, after)) = word_buffer.split_once(' ') {
+                    let completed_word = format!("{} ", before);
+                    word_buffer = after.to_string();
+                    app.emit("got_a_word", completed_word);
+                }
+            }
+        }
+
+
 
         unsafe { llama_sampler_accept(self.sampler, token) };
 
@@ -191,7 +224,21 @@ impl LlamaPipeline {
 
     }
 
-    Ok(out)
+
+    if(!word_buffer.is_empty())
+    {
+        app.emit("got_a_word", word_buffer);
+    }
+
+    let final_output = out
+        .split("</think>")
+        .collect::<Vec<&str>>()
+        .last()
+        .unwrap_or(&out.as_str())
+        .trim()
+        .to_string();
+
+    Ok(final_output)
 }
 
 // TODO: Improve sampling strategy

@@ -6,7 +6,7 @@ use crate::llama::model::LlamaModel;
 use std::fs;
 use std::env;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 
 #[tauri::command]
@@ -54,7 +54,7 @@ impl AppState {
 }
 
 #[tauri::command]
-fn generate_text(state: State<AppState>, prompt: String) -> Result<String, String> {
+fn generate_text(state: State<'_, AppState>, prompt: String, app: AppHandle) -> Result<String, String> {
     let mut pipeline = state
         .pipeline
         .lock()
@@ -62,12 +62,11 @@ fn generate_text(state: State<AppState>, prompt: String) -> Result<String, Strin
 
     let cfg = GenerationConfig::default();
 
-    println!("Generating text for prompt: {}", prompt);
+    let result = pipeline.generate(&prompt, &cfg, app);
 
-    let result = pipeline.generate(&prompt, &cfg);
     match result {
-        Ok(s) => {println!("Result: {}", s); Ok(s)},
-        Err(e) => {println!("ERROR: {}", e); Err(e)}
+        Ok(s) => Ok(s),
+        Err(e) => Err(e.to_string()),
     }
 }
 

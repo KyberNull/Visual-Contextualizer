@@ -1,5 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { register } = window.__TAURI__.globalShortcut;
+const {listen} = window.__TAURI__.event;
 
 async function handleImageUploadToRust(file)
 {
@@ -37,8 +38,21 @@ window.addEventListener("DOMContentLoaded", async() => {
   });
 
   try{
-    const result = await invoke("generate_text", {prompt : "Hello!!"});
-    console.log(result);
+    const textContainer = document.getElementById("model_output_text");
+    const spinner = document.getElementById("status_spinner");
+
+    spinner.style.display = "block";
+    const unlisten = await listen("got_a_word", (event) => {
+      spinner.style.display = "none";
+      const word = event.payload;
+      textContainer.textContent += word;
+    });
+
+
+
+    const result = await invoke("generate_text", {prompt : "I am testing u, in my app. speak for a lot of time approx 300 words"});
+    unlisten();
+    spinner.style.display = "none";
   }
   catch(error)
   {
