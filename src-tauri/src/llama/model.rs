@@ -97,59 +97,7 @@ impl LlamaModel {
         }
     }
 
-
-    pub fn apply_chat_template(&self, prompt: &str) -> Result<String, String>{
-        let role_user = CString::new("user").unwrap();
-        let cstr_prompt = CString::new(prompt).unwrap();
-
-        let message = [
-            llama_chat_message{
-                role: role_user.as_ptr(),
-                content: cstr_prompt.as_ptr(),
-            }
-        ];
-
-
-        let mut buf = vec![0u8; 1024];
-        let n = unsafe {
-            llama_chat_apply_template(
-                std::ptr::null(),
-                message.as_ptr(),
-                message.len(),
-                true,
-                buf.as_mut_ptr() as *mut i8,
-                buf.len() as i32
-            )
-
-        };
-
-        if n < 0 {
-        return Err("Failed to apply chat template".to_string());
-        }
-        
-        let mut n = n as usize;
-        if n > buf.len() {
-            buf.resize(n, 0);
-            let second_attempt = unsafe {
-            llama_chat_apply_template(
-                std::ptr::null(),
-                message.as_ptr(),
-                message.len(),
-                true,
-                buf.as_mut_ptr() as *mut i8,
-                buf.len() as i32
-                )
-            };
-
-            n = second_attempt as usize;
-
-        }
-
-        let result = String::from_utf8_lossy(&buf[..n]).into_owned();
-        Ok(result)
-        }
-
-    }
+}
 
 
 

@@ -1,3 +1,4 @@
+use crate::llama::template;
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
 
@@ -102,10 +103,14 @@ impl LlamaPipeline {
     pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig) -> Result<String, String> {
     unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
     self.reset_sampler(cfg);
-
     
-    let prompt = self.model.apply_chat_template(prompt)?;
-    let prompt_tokens = self.model.tokenize(&prompt, true)?;
+    let text_prompt = template::Message {
+        role: template::Role::User,
+        content: vec![template::Content::Text(prompt.to_string())],
+    };
+    let prompt = vec![text_prompt];
+    let formatted_prompt = template::render(&prompt);
+    let prompt_tokens = self.model.tokenize(&formatted_prompt, true)?;
     if prompt_tokens.is_empty() {
         return Err("Prompt tokenization produced no tokens".to_string());
     }
@@ -189,6 +194,7 @@ impl LlamaPipeline {
     Ok(out)
 }
 
+// TODO: Improve sampling strategy
     fn reset_sampler(&mut self, cfg: &GenerationConfig) {
         if !self.sampler.is_null() {
             unsafe { llama_sampler_free(self.sampler) };
