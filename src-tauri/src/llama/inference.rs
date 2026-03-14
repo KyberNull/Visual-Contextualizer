@@ -204,8 +204,6 @@ impl LlamaPipeline {
 
             let piece = &self.model.token_to_piece(token)?;
             out.push_str(piece);
-
-            println!("{}", piece);
         
 
             word_buffer.push_str(&piece);
@@ -264,7 +262,10 @@ impl LlamaPipeline {
             self.sampler = std::ptr::null_mut();
         }
 
-        self.sampler = unsafe { llama_sampler_chain_init(llama_sampler_chain_default_params()) };
+        let mut sampler_config = unsafe { llama_sampler_chain_default_params() };
+        sampler_config.no_perf = true; // Disable perf logging for cleaner output, and because we don't need it for generation.
+        
+        self.sampler = unsafe { llama_sampler_chain_init(sampler_config) };
         if self.sampler.is_null() {
             return;
         }
@@ -275,20 +276,12 @@ impl LlamaPipeline {
         }
 
         unsafe {
+            llama_sampler_chain_add(self.sampler, llama_sampler_init_penalties(64, cfg.repitition_penalty, 0.0, cfg.presence_penalty) );
+            llama_sampler_chain_add(self.sampler, llama_sampler_init_temp(cfg.temperature));
             llama_sampler_chain_add(self.sampler, llama_sampler_init_top_k(cfg.top_k));
             llama_sampler_chain_add(self.sampler, llama_sampler_init_top_p(cfg.top_p, 1));
             llama_sampler_chain_add(self.sampler, llama_sampler_init_min_p(cfg.min_p, 0));
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_temp(cfg.temperature));
             llama_sampler_chain_add(self.sampler, llama_sampler_init_dist(cfg.seed));
-            // TODO: PENALTIES
-            // llama_sampler_chain_add(
-            //     self.sampler,
-            //     llama_sampler_init_presence_penalty(cfg.presence_penalty),
-            // );
-            // llama_sampler_chain_add(
-            //     self.sampler,
-            //     llama_sampler_init_repetition_penalty(cfg.repitition_penalty),
-            // );
         }
     }
 }
