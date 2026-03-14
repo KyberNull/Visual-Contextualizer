@@ -47,7 +47,7 @@ pub struct ContextConfig {
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            n_ctx: 1024,  // Max context length
+            n_ctx: 1024,                       // Max context length
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
             n_threads: num_cpus::get() as i32, // Chooses threads used by llama based on cpu logical cores
         }
@@ -74,7 +74,7 @@ impl Default for GenerationConfig {
             top_p: 0.95,
             min_p: 0.0,
             temperature: 0.6,
-            seed: 6,
+            seed: 6, // TODO: make it random
             presence_penalty: 0.0,
             repitition_penalty: 1.0,
         }
@@ -97,6 +97,46 @@ impl Drop for LlamaRuntime {
     }
 }
 
+struct MtmdBitmap {
+    ptr: *mut mtmd_bitmap,
+}
+
+impl MtmdBitmap {
+    fn from_bytes(mtmd_ctx: *mut mtmd_context, image_data: Option<&[u8]>) -> Result<Self, String> {
+        let Some(bytes) = image_data else {
+            return Ok(Self {
+                ptr: std::ptr::null_mut(),
+            });
+        };
+
+        let ptr =
+            unsafe { mtmd_helper_bitmap_init_from_buf(mtmd_ctx, bytes.as_ptr(), bytes.len()) };
+        if ptr.is_null() {
+            return Err(
+                "Failed to convert image to bitmap: buffer was invalid or corrupted".into(),
+            );
+        }
+
+        Ok(Self { ptr })
+    }
+
+    fn is_null(&self) -> bool {
+        self.ptr.is_null()
+    }
+
+    fn as_const_ptr(&self) -> *const mtmd_bitmap {
+        self.ptr as *const mtmd_bitmap
+    }
+}
+
+impl Drop for MtmdBitmap {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { mtmd_bitmap_free(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
 
 pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
@@ -165,29 +205,26 @@ impl LlamaPipeline {
             return Err("Failed to create sampler chain".to_string());
         }
 
-        Ok(Self {model, ctx, sampler, mtmd_ctx,})
+        Ok(Self {
+            model,
+            ctx,
+            sampler,
+            mtmd_ctx,
+        })
     }
 
-    pub fn generate(&mut self, prompt: &str, image_data: Option<Vec<u8>>, cfg: &GenerationConfig, app: AppHandle,) -> Result<String, String> {
+    pub fn generate(
+        &mut self,
+        prompt: &str,
+        image_data: Option<Vec<u8>>,
+        cfg: &GenerationConfig,
+        app: AppHandle,
+    ) -> Result<String, String> {
         // Clear old context
         unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
         self.reset_sampler(cfg);
 
-        let bmp: *mut mtmd_bitmap = match image_data.as_ref() {
-            Some(bytes) => {
-                let ptr = unsafe {
-                    mtmd_helper_bitmap_init_from_buf(self.mtmd_ctx, bytes.as_ptr(), bytes.len())
-                };
-
-                if ptr.is_null() {
-                    return Err(
-                        "Failed to convert image to bitmap: buffer was invalid or corrupted".into(),
-                    );
-                }
-                ptr // Return the pointer to be assigned to bmp
-            }
-            None => std::ptr::null_mut(), // If no image, initialize as null
-        };
+        let bmp = MtmdBitmap::from_bytes(self.mtmd_ctx, image_data.as_deref())?;
 
         let system_prompt = template::Message {
             role: template::Role::System,
@@ -213,24 +250,16 @@ impl LlamaPipeline {
 
         let c_prompt = match CString::new(formatted_prompt) {
             Ok(v) => v,
-            Err(_) => {
-                if !bmp.is_null() {
-                    unsafe { mtmd_bitmap_free(bmp) };
-                }
-                return Err("Nul byte found in string".to_string());
-            }
+            Err(_) => return Err("Nul byte found in string".to_string()),
         };
 
         let mut bitmap_ptrs: Vec<*const mtmd_bitmap> = Vec::new();
         if !bmp.is_null() {
-            bitmap_ptrs.push(bmp as *const mtmd_bitmap);
+            bitmap_ptrs.push(bmp.as_const_ptr());
         }
 
         let chunks: *mut mtmd_input_chunks = unsafe { mtmd_input_chunks_init() };
         if chunks.is_null() {
-            if !bmp.is_null() {
-                unsafe { mtmd_bitmap_free(bmp) };
-            }
             return Err("Failed to initialize mtmd chunks".to_string());
         }
 
@@ -256,9 +285,6 @@ impl LlamaPipeline {
 
         if rc != 0 {
             unsafe { mtmd_input_chunks_free(chunks) };
-            if !bmp.is_null() {
-                unsafe { mtmd_bitmap_free(bmp) };
-            }
             return Err(format!("mtmd_tokenization failed : {}", rc));
         }
 
@@ -276,16 +302,10 @@ impl LlamaPipeline {
             );
             if success != 0 {
                 mtmd_input_chunks_free(chunks);
-                if !bmp.is_null() {
-                    mtmd_bitmap_free(bmp);
-                }
                 return Err("MTMD Eval Failed: Projector or MTMD Error".into());
             }
 
             mtmd_input_chunks_free(chunks);
-            if !bmp.is_null() {
-                mtmd_bitmap_free(bmp);
-            }
         }
 
         let stop_seq = "<|endoftext|><|im_start|>";
