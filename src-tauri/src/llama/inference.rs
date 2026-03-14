@@ -9,8 +9,6 @@ use crate::llama::model::LlamaModel;
 // They have default values but let us overwrite them when needed.
 // They also handle all the unsafe calls to the backend and memory management, so the rest of the codebase can be safe and ergonomic.
 
-// TODO: make mlock() true based on available ram
-
 const SYSTEM_PROMPT: &str = "You are a visual accessibility assistant.
 
 Your job is to explain what is happening in the given image to a visually impaired user.
@@ -156,7 +154,7 @@ impl LlamaPipeline {
         }
 
         let n_prompt = prompt_tokens.len();
-        let stop_seq = "<|endoftext|><|im_start|>assistant";
+        let stop_seq = "<|endoftext|><|im_start|>";
         let eos = self.model.eos_token();
 
 
@@ -194,7 +192,7 @@ impl LlamaPipeline {
         let mut last_pos = (n_prompt - 1) as i32;
         let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
         let mut word_buffer = String::new();
-        
+
         for _ in 0..cfg.max_tokens {
             // sample next token from logits of last position
 

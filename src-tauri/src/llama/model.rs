@@ -9,7 +9,8 @@ pub struct LlamaModel {
 impl LlamaModel {
     pub fn load(path: &str) -> Result<Self, String> {
         let c_path = CString::new(path).map_err(|_| "Model path contains NUL byte".to_string())?;
-        let params = unsafe { llama_model_default_params() };
+        let mut params = unsafe { llama_model_default_params() };
+        params.use_mlock = true; // Enable mlock to prevent swapping
         let model = unsafe { llama_model_load_from_file(c_path.as_ptr(), params) };
         if model.is_null() {
             return Err(format!("Failed to load model from path: {path}"));
