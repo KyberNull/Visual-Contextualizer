@@ -25,6 +25,7 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header("llama_cpp/include/llama.h")
         .header("llama_cpp/tools/mtmd/mtmd.h")
+        .header("llama_cpp/tools/mtmd/mtmd-helper.h")
         .clang_arg(format!("-I{}", dst.join("include").display()))
         .clang_arg(format!("-I{}", dst.join("tools/mtmd").display()))
         .generate()
@@ -48,6 +49,10 @@ fn main() {
 
         copy_dlls(&lib_dir, &target_dir);
     }
+
+    println!("cargo:rerun-if-changed=llama_cpp/include/llama.h");
+    println!("cargo:rerun-if-changed=llama_cpp/tools/mtmd/mtmd.h");
+    println!("cargo:rerun-if-changed=llama_cpp/tools/mtmd/mtmd-helper.h");
 }
 
 #[cfg(target_os = "windows")]
