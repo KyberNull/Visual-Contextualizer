@@ -162,6 +162,7 @@ impl LlamaPipeline {
         let sampler = unsafe { llama_sampler_chain_init(llama_sampler_chain_default_params()) };
         if sampler.is_null() {
             unsafe { llama_free(ctx) };
+            unsafe { mtmd_free(mtmd_ctx) };
             return Err("Failed to create sampler chain".to_string());
         }
 
