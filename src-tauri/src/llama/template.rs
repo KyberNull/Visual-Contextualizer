@@ -1,20 +1,20 @@
-pub enum Role {
+pub(super) enum Role {
     System,
     User,
 }
 
-pub enum Content {
+pub(super) enum Content {
     Text(String),
     Image,
 }
 
-pub struct Message {
+pub(super) struct Message {
     pub role: Role,
     pub content: Vec<Content>,
 }
 
 // Renderer for single-turn Qwen-style ChatML prompts with thinking disabled
-pub fn render(messages: &[Message]) -> String {
+pub(super) fn render(messages: &[Message]) -> String {
     let mut out = String::with_capacity(512);
 
     for msg in messages {

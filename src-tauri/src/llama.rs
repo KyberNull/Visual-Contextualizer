@@ -1,4 +1,5 @@
 mod bindings;
-pub mod model;
+mod handles;
 pub mod inference;
+pub mod model;
 mod template;

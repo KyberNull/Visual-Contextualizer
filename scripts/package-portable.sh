@@ -11,7 +11,11 @@ PIPER_CONFIG_SRC="$ROOT_DIR/src-tauri/en_US-libritts_r-medium.onnx.json"
 
 echo "Building release binary (no native bundle)..."
 cd "$ROOT_DIR"
-bun tauri build --bundles none
+if [[ "${SKIP_TAURI_BUILD:-0}" != "1" ]]; then
+  bun tauri build --bundles none
+else
+  echo "Skipping tauri build (SKIP_TAURI_BUILD=1)"
+fi
 
 if [[ ! -f "$BIN_SRC" ]]; then
   echo "ERROR: Binary not found at $BIN_SRC"
