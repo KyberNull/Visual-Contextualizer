@@ -120,3 +120,11 @@ body {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+.highlighted_word 
+{
+  background-color: #ffeb3b !important; 
+  color: #000000 !important;
+  min-width: 5px;
+  display: inline-block;
+}

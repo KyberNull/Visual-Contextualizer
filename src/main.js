@@ -30,6 +30,8 @@ async function handleImageUploadToRust(file)
 
 
 window.addEventListener("DOMContentLoaded", async() => {
+  //Implementing default dark theme
+  const isDark = document.body.classList.toggle("dark-theme")
 
   await register('CommandOrControl+Shift+N', (event) => {
     if(event.state == "Pressed"){
@@ -39,13 +41,29 @@ window.addEventListener("DOMContentLoaded", async() => {
 
   try{
     const textContainer = document.getElementById("model_output_text");
+    const highlightedWord = document.querySelector(".highlighted_word");
     const spinner = document.getElementById("status_spinner");
 
     spinner.style.display = "block";
     const unlisten = await listen("got_a_word", (event) => {
-      spinner.style.display = "none";
-      const word = event.payload;
-      textContainer.textContent += word;
+    spinner.style.display = "none";
+    const word = event.payload;
+
+    if(highlightedWord){
+      if (highlightedWord.textContent !== "") {
+        const oldNode = document.createTextNode(highlightedWord.textContent, "");
+        textContainer.insertBefore(oldNode, highlightedWord)
+      }
+
+      highlightedWord.textContent = word;
+
+      highlightedWord.style.backgroundColor = "yellow";
+      highlightedWord.style.display = "inline";
+    }else{
+      console.log("The highlightWord DOM element cant be accessed.")
+    }
+
+
     });
 
 
