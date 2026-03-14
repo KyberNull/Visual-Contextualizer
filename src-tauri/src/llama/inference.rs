@@ -198,6 +198,94 @@ impl Drop for LlamaBatch {
     }
 }
 
+struct LlamaContextHandle {
+    ptr: *mut llama_context,
+}
+
+impl LlamaContextHandle {
+    fn from_model(model: *mut llama_model, params: llama_context_params) -> Result<Self, String> {
+        let ptr = unsafe { llama_init_from_model(model, params) };
+        if ptr.is_null() {
+            return Err("Failed to create llama context".to_string());
+        }
+        Ok(Self { ptr })
+    }
+
+    fn into_raw(mut self) -> *mut llama_context {
+        let ptr = self.ptr;
+        self.ptr = std::ptr::null_mut();
+        ptr
+    }
+}
+
+impl Drop for LlamaContextHandle {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { llama_free(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+struct MtmdContextHandle {
+    ptr: *mut mtmd_context,
+}
+
+impl MtmdContextHandle {
+    fn from_file(path: *const i8, model: *mut llama_model) -> Result<Self, String> {
+        let mtmd_params = unsafe { mtmd_context_params_default() };
+        let ptr = unsafe { mtmd_init_from_file(path, model, mtmd_params) };
+        if ptr.is_null() {
+            return Err("Failed to create mtmd context".to_string());
+        }
+        Ok(Self { ptr })
+    }
+
+    fn into_raw(mut self) -> *mut mtmd_context {
+        let ptr = self.ptr;
+        self.ptr = std::ptr::null_mut();
+        ptr
+    }
+}
+
+impl Drop for MtmdContextHandle {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { mtmd_free(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+struct LlamaSamplerHandle {
+    ptr: *mut llama_sampler,
+}
+
+impl LlamaSamplerHandle {
+    fn new_default() -> Result<Self, String> {
+        let ptr = unsafe { llama_sampler_chain_init(llama_sampler_chain_default_params()) };
+        if ptr.is_null() {
+            return Err("Failed to create sampler chain".to_string());
+        }
+        Ok(Self { ptr })
+    }
+
+    fn into_raw(mut self) -> *mut llama_sampler {
+        let ptr = self.ptr;
+        self.ptr = std::ptr::null_mut();
+        ptr
+    }
+}
+
+impl Drop for LlamaSamplerHandle {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { llama_sampler_free(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
 pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
@@ -242,34 +330,20 @@ impl LlamaPipeline {
         cparams.kv_unified = true;
         cparams.n_seq_max = 4;
 
-        let ctx = unsafe { llama_init_from_model(model.ptr, cparams) };
-        if ctx.is_null() {
-            return Err("Failed to create llama context".to_string());
-        }
+        let ctx = LlamaContextHandle::from_model(model.ptr, cparams)?;
 
         let path = resolve_dependency_path(Path::new("Qwen3.5-0.8B-GGUF/mmproj-BF16.gguf"))?;
         let path = path.to_str().ok_or("Model path contains non-UTF-8 bytes")?;
         let path = CString::new(path).map_err(|_| "Model path contains NUL byte".to_string())?;
 
-        let mtmd_params = unsafe { mtmd_context_params_default() };
-        let mtmd_ctx = unsafe { mtmd_init_from_file(path.as_ptr(), model.ptr, mtmd_params) };
-        if mtmd_ctx.is_null() {
-            unsafe { llama_free(ctx) };
-            return Err("Failed to create mtmd context".to_string());
-        }
-
-        let sampler = unsafe { llama_sampler_chain_init(llama_sampler_chain_default_params()) };
-        if sampler.is_null() {
-            unsafe { llama_free(ctx) };
-            unsafe { mtmd_free(mtmd_ctx) };
-            return Err("Failed to create sampler chain".to_string());
-        }
+        let mtmd_ctx = MtmdContextHandle::from_file(path.as_ptr(), model.ptr)?;
+        let sampler = LlamaSamplerHandle::new_default()?;
 
         Ok(Self {
             model,
-            ctx,
-            sampler,
-            mtmd_ctx,
+            ctx: ctx.into_raw(),
+            sampler: sampler.into_raw(),
+            mtmd_ctx: mtmd_ctx.into_raw(),
         })
     }
 
