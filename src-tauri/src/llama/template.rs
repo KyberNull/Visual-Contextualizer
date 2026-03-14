@@ -27,7 +27,8 @@ pub fn render(messages: &[Message]) -> String {
             match item {
                 Content::Text(text) => out.push_str(text),
                 Content::Image => {
-                    out.push_str("<|vision_start|><|image_pad|><|vision_end|>");
+                    out.push_str("<|vision_start|><__media__><|image_pad|><|vision_end|>");
+                    //out.push_str("<__media__>");
                 }
             }
         }

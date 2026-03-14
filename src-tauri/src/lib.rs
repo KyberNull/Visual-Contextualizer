@@ -106,7 +106,10 @@ pub fn setup_voice_engine(app : &AppHandle){
             let text_to_speak = queue.join(" ");
             queue.clear();
 
-            handle.emit("tts_word", WordPayload {word: text_to_speak.clone()}).unwrap();
+            if let Err(err) = handle.emit("tts_word", WordPayload { word: text_to_speak.clone() }) {
+                eprintln!("Failed to emit tts_word event: {}", err);
+                return;
+            }
 
 
             let state = handle.state::<crate::AppState>();
@@ -148,7 +151,7 @@ pub fn setup_voice_engine(app : &AppHandle){
 
 
 #[tauri::command]
-async fn generate_text(state: State<'_ , AppState>, prompt: String, app : AppHandle) -> Result<String, String> {
+async fn generate_text(state: State<'_ , AppState>, prompt: String,image_bytes:Vec<u8>, app : AppHandle) -> Result<String, String> {
 
     let app_handle = app.clone();
 
@@ -162,9 +165,17 @@ async fn generate_text(state: State<'_ , AppState>, prompt: String, app : AppHan
     
             let cfg = GenerationConfig::default();
     
-            println!("Generating text for prompt: {}", prompt);
+
+            let image_data = if image_bytes.is_empty() {
+                None
+            } else {
+                Some(image_bytes)
+            };
+
+
+            //println!("Generating text for prompt: {}", prompt);
     
-            pipeline.generate(&prompt, &cfg, app_handle2)
+            pipeline.generate(&prompt, image_data, &cfg, app_handle2)
     
         }).await.map_err(|e| e.to_string())?;
     

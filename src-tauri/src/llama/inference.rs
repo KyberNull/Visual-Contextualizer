@@ -69,7 +69,7 @@ pub struct GenerationConfig {
 impl Default for GenerationConfig {
     fn default() -> Self {
         Self {
-            max_tokens: 4096,
+            max_tokens: 100,
             top_k: 20,
             top_p: 0.8,
             min_p: 0.0,
@@ -110,7 +110,7 @@ impl LlamaPipeline {
         let mut cparams = unsafe { llama_context_default_params() };
         cparams.n_ctx = cfg.n_ctx;
         cparams.n_batch = cfg.n_batch;
-        cparams.n_ubatch = cfg.n_batch/16;
+        cparams.n_ubatch = cfg.n_batch;
         cparams.n_threads = cfg.n_threads;
         cparams.n_threads_batch = cfg.n_threads;
         cparams.kv_unified = true;
@@ -145,76 +145,148 @@ impl LlamaPipeline {
             mtmd_ctx,
         })
     }
-    pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig, app: AppHandle) -> Result<String, String> {
+    pub fn generate(&mut self, prompt: &str, image_data: Option<Vec<u8>>,cfg: &GenerationConfig, app: AppHandle) -> Result<String, String> {
 
         // Clear old context
         unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
         self.reset_sampler(cfg);
-        
+
+
+        let bmp: *mut mtmd_bitmap = match image_data.as_ref() {
+            Some(bytes) => {
+                let ptr = unsafe {
+                    mtmd_helper_bitmap_init_from_buf(
+                        self.mtmd_ctx,
+                        bytes.as_ptr(),
+                        bytes.len(),
+                    )
+                };
+
+                if ptr.is_null() {
+                    return Err("Failed to convert image to bitmap: buffer was invalid or corrupted".into());
+                }
+                ptr // Return the pointer to be assigned to bmp
+            }
+            None => std::ptr::null_mut(), // If no image, initialize as null
+        };
+
         let system_prompt = template::Message {
             role: template::Role::System,
             content: vec![template::Content::Text(SYSTEM_PROMPT.to_string())],
         };
 
+
+        let user_content = if !bmp.is_null(){
+            vec![ 
+                template::Content::Image, 
+                template::Content::Text(format!("\n{}", prompt)),
+
+                ]
+        }else {
+            vec![template::Content::Text(prompt.to_string())]
+        };
+
+
         let user_prompt = template::Message {
             role: template::Role::User,
-            content: vec![template::Content::Text(prompt.to_string())],
+            content: user_content,
         };
 
         let prompt = [system_prompt, user_prompt];
         let formatted_prompt = template::render(&prompt);
-        let prompt_tokens = self.model.tokenize(&formatted_prompt, false)?;
-        if prompt_tokens.is_empty() {
-            return Err("Prompt tokenization produced no tokens".to_string());
+
+        let c_prompt = match CString::new(formatted_prompt) {
+            Ok(v) => v,
+            Err(_) => {
+                if !bmp.is_null() {
+                    unsafe { mtmd_bitmap_free(bmp) };
+                }
+                return Err("Nul byte found in string".to_string());
+            }
+        };
+
+
+        let mut bitmap_ptrs: Vec<*const mtmd_bitmap> = Vec::new();
+        if !bmp.is_null() {
+            bitmap_ptrs.push(bmp as *const mtmd_bitmap);
+}
+
+        let chunks: *mut mtmd_input_chunks = unsafe { mtmd_input_chunks_init() };
+        if chunks.is_null() {
+            if !bmp.is_null() {
+                unsafe { mtmd_bitmap_free(bmp) };
+            }
+            return Err("Failed to initialize mtmd chunks".to_string());
         }
 
-        let n_prompt = prompt_tokens.len();
+        let input_text = mtmd_input_text {
+            text: c_prompt.as_ptr(),
+            add_special: false,
+            parse_special: true,
+
+        };
+
+        let rc = unsafe {
+            mtmd_tokenize(
+                self.mtmd_ctx,
+                chunks,
+                &input_text,
+                if bitmap_ptrs.is_empty() {
+                    std::ptr::null_mut()
+                } else {
+                    bitmap_ptrs.as_mut_ptr()
+                },
+                bitmap_ptrs.len(),
+            )
+        };
+
+        if rc != 0 {
+            unsafe { mtmd_input_chunks_free(chunks) };
+            if !bmp.is_null() {
+                unsafe { mtmd_bitmap_free(bmp) };
+            }
+            return Err(format!("mtmd_tokenization failed : {}", rc));
+        }
+
+        let mut new_n_past: llama_pos = 0;
+        unsafe {
+            let success = mtmd_helper_eval_chunks(self.mtmd_ctx, self.ctx, chunks, 0, 0, 512, true, &mut new_n_past);
+            if success != 0 {
+                mtmd_input_chunks_free(chunks);
+                if !bmp.is_null() {
+                    mtmd_bitmap_free(bmp);
+                }
+                return Err("MTMD Eval Failed: Projector or MTMD Error".into());
+            }
+
+            mtmd_input_chunks_free(chunks);
+            if !bmp.is_null() {
+                mtmd_bitmap_free(bmp);
+            }
+            
+
+        }
+
         let stop_seq = "<|endoftext|><|im_start|>";
         let eos = self.model.eos_token();
 
-
-        // ---- build batch for prompt ----
-
-        //llama_batch_init allocates the memory based on the nos of tokens passed in it.
-        let mut batch = unsafe { llama_batch_init(n_prompt as i32, 0, 1) };
-        //MANUALLY setting the nos of tokens to be processed.
-        batch.n_tokens = n_prompt as i32;
-
-        unsafe {
-            for i in 0..n_prompt {
-                *batch.token.add(i) = prompt_tokens[i];
-                *batch.pos.add(i) = i as i32;
-                *batch.n_seq_id.add(i) = 1;
-
-                let seq_ptr = *batch.seq_id.add(i);
-                *seq_ptr.add(0) = 0;
-
-                *batch.logits.add(i) = if i == n_prompt - 1 { 1 } else { 0 };
-            }
-        }
-
-        // ---- decode prompt ----
-        let rc = unsafe { llama_decode(self.ctx, batch) };
-        if rc != 0 {
-            unsafe { llama_batch_free(batch) };
-            return Err(format!("Prompt decode failed with code {rc}"));
-        }
-
-        unsafe { llama_batch_free(batch) };
-
         // ---- generation loop ----
         let mut out = String::new();
-        let mut last_pos = (n_prompt - 1) as i32;
-        let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
+        let mut current_pos = new_n_past;
+        // After prompt/chunk eval, logits_last=true gives one logits row to sample from.
+        // Sample from logits index 0, not absolute token position.
+        let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1)};
         let mut word_buffer = String::new();
 
         for _ in 0..cfg.max_tokens {
             // sample next token from logits of last position
-
             if token == eos {
                 break;
             }
 
+
+
+            
             let piece = &self.model.token_to_piece(token)?;
             out.push_str(piece);
 
@@ -250,7 +322,7 @@ impl LlamaPipeline {
 
             unsafe {
                 *batch.token.add(0) = token;
-                *batch.pos.add(0) = last_pos + 1;
+                *batch.pos.add(0) = current_pos;
                 *batch.n_seq_id.add(0) = 1;
 
                 let seq_ptr = *batch.seq_id.add(0);
@@ -266,8 +338,8 @@ impl LlamaPipeline {
                 return Err(format!("Decode failed while generating with code {rc}"));
             }
 
-            last_pos += 1;
-            token = unsafe { llama_sampler_sample(self.sampler, self.ctx, 0)};
+            current_pos += 1;
+            token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1)};
 
         }
 
@@ -314,6 +386,10 @@ impl Drop for LlamaPipeline {
         if !self.sampler.is_null() {
             unsafe { llama_sampler_free(self.sampler) };
             self.sampler = std::ptr::null_mut();
+        }
+        if !self.mtmd_ctx.is_null() {
+            unsafe { mtmd_free(self.mtmd_ctx) };
+            self.mtmd_ctx = std::ptr::null_mut();
         }
         if !self.ctx.is_null() {
             unsafe { llama_free(self.ctx) };

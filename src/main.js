@@ -2,6 +2,16 @@ const { invoke } = window.__TAURI__.core;
 const { register } = window.__TAURI__.globalShortcut;
 const {listen} = window.__TAURI__.event;
 
+function ensureHighlightSpan(textContainer) {
+  if (!textContainer) return null;
+  let highlighted = textContainer.querySelector(".highlighted_word");
+  if (!highlighted) {
+    textContainer.innerHTML = '<span class="highlighted_word"></span>';
+    highlighted = textContainer.querySelector(".highlighted_word");
+  }
+  return highlighted;
+}
+
 
 async function handleImageUploadToRust(file)
 {
@@ -11,20 +21,37 @@ async function handleImageUploadToRust(file)
     return;
   }
 
+  const spinner = document.getElementById("status_spinner");
+  const textContainer = document.getElementById("model_output_text");
+
+
   try{
     const arrayBuffer = await file.arrayBuffer();
     const uintArray  = new Uint8Array(arrayBuffer);
-    const json_data = Array.from(uintArray);
+    const imageBytes = Array.from(uintArray);
 
-    const response = await invoke("get_img", {data : json_data});
-    console.log("Rust response: ", response);
-    alert("Image send successfully !!");
+
+    if (textContainer) {
+      textContainer.innerHTML = '<span class="highlighted_word"></span>';
+    }
+    spinner.style.display = "block";
+
+    const result = await invoke("generate_text", {prompt : "Describe the image", imageBytes});
+    console.log("Generation complete:", result);
+
+    // Fallback: if streaming events are delayed/missed, still show final output.
+    const hasRenderedText = !!(textContainer && textContainer.textContent && textContainer.textContent.trim());
+    if (!hasRenderedText && typeof result === "string" && result.trim() !== "") {
+      textContainer.textContent = result;
+    }
   }
-
   catch (error)
   {
-    console.error(error);
+    console.error("Error durin image processing: ", error);
     alert("Check console for error");
+  }
+  finally{
+    spinner.style.display = "none";
   }
 }
 
@@ -35,40 +62,36 @@ window.addEventListener("DOMContentLoaded", async() => {
   //Implementing default dark theme
   const isDark = document.body.classList.toggle("dark-theme")
 
+  const textContainer = document.getElementById("model_output_text");
+  const spinner = document.getElementById("status_spinner");
 
-
-  await register('CommandOrControl+Shift+N', (event) => {
-    if(event.state == "Pressed"){
-      console.log('Shortcut triggered');
-    }
-  });
-
-  try{
-    const textContainer = document.getElementById("model_output_text");
-    const highlightedWord = document.querySelector(".highlighted_word");
-    const spinner = document.getElementById("status_spinner");
-
-    spinner.style.display = "block";
-    const unlisten = await listen("tts_word", (event) => {
+  try {
+    await listen("tts_word", (event) => {
       spinner.style.display = "none";
-      const word = event.payload.word;
-      if(highlightedWord){
+      const word = event.payload?.word ?? "";
+      const highlightedWord = ensureHighlightSpan(textContainer);
+      if (highlightedWord && textContainer) {
         if (highlightedWord.textContent !== "") {
-            const oldNode = document.createTextNode(highlightedWord.textContent + "");
-            textContainer.insertBefore(oldNode, highlightedWord)
+          const oldNode = document.createTextNode(highlightedWord.textContent + " ");
+          textContainer.insertBefore(oldNode, highlightedWord);
         }
         highlightedWord.textContent = word;
         highlightedWord.style.backgroundColor = "#6393ce";
         highlightedWord.style.display = "inline";
-    }
+      }
     });
-
-    const result = await invoke("generate_text", {prompt : "You are given a TTS speak something."});
-    spinner.style.display = "none";
+  } catch (error) {
+    console.log("Failed to attach tts_word listener:", error);
   }
-  catch(error)
-  {
-    console.log(error);
+
+  try {
+    await register('CommandOrControl+Shift+N', (event) => {
+      if(event.state == "Pressed"){
+        console.log('Shortcut triggered');
+      }
+    });
+  } catch (error) {
+    console.log("Shortcut registration failed:", error);
   }
 
   const darkThemeButton = document.querySelector(".dark_mode_container");
