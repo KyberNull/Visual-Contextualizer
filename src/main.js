@@ -177,6 +177,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   UI.themeBtn?.addEventListener("click", () => {
     const isDark = document.body.classList.toggle("dark-theme");
     UI.themeBtn.textContent = isDark ? "Light" : "Dark";
+    UI.themeBtn.textContent = isDark ? " ☀️ " : " 🌙 ";
   });
 
   // Word Stream Listener
