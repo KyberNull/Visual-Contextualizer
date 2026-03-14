@@ -4,6 +4,8 @@ use tauri:: Emitter;
 use crate::llama::template;
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
+use std::env;
+use std::ffi::CString;
 
 // Structs are made to mirror the C structs in llama.h, but with more Rusty ergonomics where possible. 
 // They have default values but let us overwrite them when needed.
@@ -100,6 +102,7 @@ pub struct LlamaPipeline {
     model: LlamaModel,
     ctx: *mut llama_context,
     sampler: *mut llama_sampler,
+    mtmd_ctx: *mut mtmd_context,
 }
 
 impl LlamaPipeline {
@@ -118,6 +121,17 @@ impl LlamaPipeline {
             return Err("Failed to create llama context".to_string());
         }
 
+        let path = env::current_dir().unwrap().join("Qwen3.5-0.8B-GGUF").join("mmproj-BF16.gguf");
+        let path = path.to_str().ok_or("Error")?;
+        let path = CString::new(path).map_err(|_| "Model path contains NUL byte".to_string())?;
+
+        let mtmd_params = unsafe { mtmd_context_params_default() };
+        let mtmd_ctx = unsafe { mtmd_init_from_file(path.as_ptr(), model.ptr, mtmd_params) };
+        if mtmd_ctx.is_null() {
+            unsafe { llama_free(ctx) };
+            return Err("Failed to create mtmd context".to_string());
+        }
+
         let sampler = unsafe { llama_sampler_chain_init(llama_sampler_chain_default_params()) };
         if sampler.is_null() {
             unsafe { llama_free(ctx) };
@@ -128,6 +142,7 @@ impl LlamaPipeline {
             model,
             ctx,
             sampler,
+            mtmd_ctx,
         })
     }
     pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig, app: AppHandle) -> Result<String, String> {
