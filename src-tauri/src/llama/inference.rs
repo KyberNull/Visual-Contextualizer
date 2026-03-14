@@ -156,7 +156,6 @@ impl LlamaPipeline {
     let mut last_pos = (n_prompt - 1) as i32;
     let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
     let mut word_buffer = String::new();
-    let mut is_thinking = false; 
     for _ in 0..cfg.max_tokens {
 
         // sample next token from logits of last position
@@ -169,30 +168,17 @@ impl LlamaPipeline {
         let piece = &self.model.token_to_piece(token)?;
         out.push_str(piece);
         
-        // Dynamically detect thinking block initiation
-        if piece.contains("<think>") {
-            is_thinking = true;
-        }
 
         word_buffer.push_str(&piece);
 
-        if(out.contains("</think>") && is_thinking)
-        {
-            is_thinking = false;
-            if let Some((_before, after)) = out.split_once("</think>")
-            {
-                word_buffer = after.to_string();
+        if let Some((_before, _after)) = word_buffer.split_once(' ') {
+
+        while let Some((before, after)) = word_buffer.split_once(' ') {
+            let completed_word = format!("{} ", before);
+            word_buffer = after.to_string();
+            let _ = app.emit("got_a_word", completed_word);
             }
-        }
-        if let Some((before, after)) = word_buffer.split_once(' ')
-        {
-            if (!is_thinking){
-                while let Some((before, after)) = word_buffer.split_once(' ') {
-                    let completed_word = format!("{} ", before);
-                    word_buffer = after.to_string();
-                    app.emit("got_a_word", completed_word);
-                }
-            }
+            
         }
 
 
@@ -227,20 +213,13 @@ impl LlamaPipeline {
     }
 
 
-    if(!word_buffer.is_empty())
+    if !word_buffer.is_empty()
     {
-        app.emit("got_a_word", word_buffer);
+        let _ = app.emit("got_a_word", word_buffer);
     }
 
-    let final_output = out
-        .split("</think>")
-        .collect::<Vec<&str>>()
-        .last()
-        .unwrap_or(&out.as_str())
-        .trim()
-        .to_string();
 
-    Ok(final_output)
+    Ok(out)
 }
 
 // TODO: Improve sampling strategy
