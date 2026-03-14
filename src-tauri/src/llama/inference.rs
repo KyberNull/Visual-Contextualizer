@@ -1,7 +1,6 @@
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
 use crate::llama::template;
-use num_cpus;
 use std::env;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
@@ -47,9 +46,9 @@ pub struct ContextConfig {
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            n_ctx: 1024,                       // Max context length
+            n_ctx: 1024,  // Max context length
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
-            n_threads: 6
+            n_threads: 6,
         }
     }
 }
@@ -162,6 +161,40 @@ impl Drop for MtmdInputChunks {
             unsafe { mtmd_input_chunks_free(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
+    }
+}
+
+struct LlamaBatch {
+    raw: llama_batch,
+}
+
+impl LlamaBatch {
+    fn single_token(token: llama_token, pos: llama_pos) -> Self {
+        let mut raw = unsafe { llama_batch_init(1, 0, 1) };
+        raw.n_tokens = 1;
+
+        unsafe {
+            *raw.token.add(0) = token;
+            *raw.pos.add(0) = pos;
+            *raw.n_seq_id.add(0) = 1;
+
+            let seq_ptr = *raw.seq_id.add(0);
+            *seq_ptr.add(0) = 0;
+
+            *raw.logits.add(0) = 1;
+        }
+
+        Self { raw }
+    }
+
+    fn as_raw(&self) -> llama_batch {
+        self.raw
+    }
+}
+
+impl Drop for LlamaBatch {
+    fn drop(&mut self) {
+        unsafe { llama_batch_free(self.raw) };
     }
 }
 
@@ -372,22 +405,8 @@ impl LlamaPipeline {
             unsafe { llama_sampler_accept(self.sampler, token) };
 
             // ---- decode generated token ----
-            let mut batch = unsafe { llama_batch_init(1, 0, 1) };
-            batch.n_tokens = 1; // <-- Tell the batch it contains 1 token
-
-            unsafe {
-                *batch.token.add(0) = token;
-                *batch.pos.add(0) = current_pos;
-                *batch.n_seq_id.add(0) = 1;
-
-                let seq_ptr = *batch.seq_id.add(0);
-                *seq_ptr.add(0) = 0;
-
-                *batch.logits.add(0) = 1;
-            }
-
-            let rc = unsafe { llama_decode(self.ctx, batch) };
-            unsafe { llama_batch_free(batch) };
+            let batch = LlamaBatch::single_token(token, current_pos);
+            let rc = unsafe { llama_decode(self.ctx, batch.as_raw()) };
 
             if rc != 0 {
                 return Err(format!("Decode failed while generating with code {rc}"));
