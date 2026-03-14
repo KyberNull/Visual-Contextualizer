@@ -49,9 +49,9 @@ window.addEventListener("DOMContentLoaded", async() => {
     const spinner = document.getElementById("status_spinner");
 
     spinner.style.display = "block";
-    const unlisten = await listen("got_a_word", (event) => {
+    const unlisten = await listen("tts_word", (event) => {
       spinner.style.display = "none";
-      const word = event.payload;
+      const word = event.payload.word;
       if(highlightedWord){
         if (highlightedWord.textContent !== "") {
             const oldNode = document.createTextNode(highlightedWord.textContent + "");
@@ -63,7 +63,7 @@ window.addEventListener("DOMContentLoaded", async() => {
     }
     });
 
-    const result = await invoke("generate_text", {prompt : "I am testing u for my app, speak for soe  time about 300 words"});
+    const result = await invoke("generate_text", {prompt : "You are given a TTS speak something."});
     spinner.style.display = "none";
   }
   catch(error)

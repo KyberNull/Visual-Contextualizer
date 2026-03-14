@@ -13,6 +13,8 @@ use piper_rs::synth::PiperSpeechSynthesizer;
 use rodio::{DeviceSinkBuilder, Player, buffer::SamplesBuffer};
 use std::sync::Arc;
 use std::num::NonZeroU16;
+use tauri::Emitter;
+use::serde::Serialize;
 use std::path::Path;
 
 
@@ -81,6 +83,10 @@ impl AppState {
 }
 
 
+#[derive(Clone, Serialize)]
+struct WordPayload {
+    word: String,
+}
 
 
 pub fn setup_voice_engine(app : &AppHandle){
@@ -99,6 +105,8 @@ pub fn setup_voice_engine(app : &AppHandle){
         if queue.len() >= 5 || is_end {
             let text_to_speak = queue.join(" ");
             queue.clear();
+
+            handle.emit("tts_word", WordPayload {word: text_to_speak.clone()}).unwrap();
 
 
             let state = handle.state::<crate::AppState>();
@@ -140,21 +148,27 @@ pub fn setup_voice_engine(app : &AppHandle){
 
 
 #[tauri::command]
-fn generate_text(state: State<AppState>, prompt: String, app : AppHandle) -> Result<String, String> {
-    let mut pipeline = state
-        .pipeline
-        .lock()
-        .map_err(|_| "Failed to lock pipeline".to_string())?;
+async fn generate_text(state: State<'_ , AppState>, prompt: String, app : AppHandle) -> Result<String, String> {
 
-    let cfg = GenerationConfig::default();
+    let app_handle = app.clone();
 
-    println!("Generating text for prompt: {}", prompt);
-
-    let result = pipeline.generate(&prompt, &cfg, app);
-    match result {
-        Ok(s) => {println!("Result: {}", s); Ok(s)},
-        Err(e) => {println!("ERROR: {}", e); Err(e)}
-    }
+    let res = tauri::async_runtime::spawn_blocking(move ||{
+            let app_handle2 = app_handle.clone();
+            let state = app_handle.state::<AppState>();
+            let mut pipeline = state
+                .pipeline
+                .lock()
+                .map_err(|_| "Failed to lock pipeline".to_string())?;
+    
+            let cfg = GenerationConfig::default();
+    
+            println!("Generating text for prompt: {}", prompt);
+    
+            pipeline.generate(&prompt, &cfg, app_handle2)
+    
+        }).await.map_err(|e| e.to_string())?;
+    
+    res 
 }
 
 
