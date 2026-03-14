@@ -1,6 +1,3 @@
-use tauri::AppHandle;
-use tauri::Emitter;
-
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
 use crate::llama::template;
@@ -8,6 +5,7 @@ use num_cpus;
 use std::env;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter};
 
 // Structs are made to mirror the C structs in llama.h, but with more Rusty ergonomics where possible.
 // They have default values but let us overwrite them when needed.
@@ -51,7 +49,7 @@ impl Default for ContextConfig {
         Self {
             n_ctx: 1024,  // Max context length
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
-            n_threads: num_cpus::get() as i32,
+            n_threads: num_cpus::get() as i32, // Chooses threads used by llama based on cpu logical cores
         }
     }
 }
@@ -99,13 +97,6 @@ impl Drop for LlamaRuntime {
     }
 }
 
-// Actual generation engine
-pub struct LlamaPipeline {
-    model: LlamaModel,
-    ctx: *mut llama_context,
-    sampler: *mut llama_sampler,
-    mtmd_ctx: *mut mtmd_context,
-}
 
 pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
@@ -130,6 +121,14 @@ pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
     }
 
     Err(format!("Could not find dependency: {}", relative.display()))
+}
+
+// Actual generation engine
+pub struct LlamaPipeline {
+    model: LlamaModel,
+    ctx: *mut llama_context,
+    sampler: *mut llama_sampler,
+    mtmd_ctx: *mut mtmd_context,
 }
 
 impl LlamaPipeline {
@@ -166,20 +165,10 @@ impl LlamaPipeline {
             return Err("Failed to create sampler chain".to_string());
         }
 
-        Ok(Self {
-            model,
-            ctx,
-            sampler,
-            mtmd_ctx,
-        })
+        Ok(Self {model, ctx, sampler, mtmd_ctx,})
     }
-    pub fn generate(
-        &mut self,
-        prompt: &str,
-        image_data: Option<Vec<u8>>,
-        cfg: &GenerationConfig,
-        app: AppHandle,
-    ) -> Result<String, String> {
+
+    pub fn generate(&mut self, prompt: &str, image_data: Option<Vec<u8>>, cfg: &GenerationConfig, app: AppHandle,) -> Result<String, String> {
         // Clear old context
         unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
         self.reset_sampler(cfg);
