@@ -51,7 +51,7 @@ impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             n_ctx: 1024,  // Max context length
-            n_batch: 512, // TODO: make it choose the batch size based on the cpu
+            n_batch: 256, // TODO: make it choose the batch size based on the cpu
             n_threads: 6,
         }
     }
@@ -140,7 +140,7 @@ impl LlamaPipeline {
         cparams.n_batch = cfg.n_batch;
         cparams.n_ubatch = cfg.n_batch;
         cparams.n_threads = cfg.n_threads;
-        cparams.n_threads_batch = (cfg.n_threads / 2).max(4);
+        cparams.n_threads_batch = (cfg.n_threads / 2).max(2);
         cparams.kv_unified = true;
         cparams.n_seq_max = 4;
 
