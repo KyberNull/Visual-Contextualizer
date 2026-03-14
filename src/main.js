@@ -2,6 +2,7 @@ const { invoke } = window.__TAURI__.core;
 const { register } = window.__TAURI__.globalShortcut;
 const {listen} = window.__TAURI__.event;
 
+
 async function handleImageUploadToRust(file)
 {
   if(!file)
@@ -29,9 +30,12 @@ async function handleImageUploadToRust(file)
 
 
 
-window.addEventListener("DOMContentLoaded", async() => {
+
+window.addEventListener("DOMContentLoaded", async() => {  
   //Implementing default dark theme
   const isDark = document.body.classList.toggle("dark-theme")
+
+
 
   await register('CommandOrControl+Shift+N', (event) => {
     if(event.state == "Pressed"){
@@ -46,30 +50,20 @@ window.addEventListener("DOMContentLoaded", async() => {
 
     spinner.style.display = "block";
     const unlisten = await listen("got_a_word", (event) => {
-    spinner.style.display = "none";
-    const word = event.payload;
-
-    if(highlightedWord){
-      if (highlightedWord.textContent !== "") {
-        const oldNode = document.createTextNode(highlightedWord.textContent, "");
-        textContainer.insertBefore(oldNode, highlightedWord)
-      }
-
-      highlightedWord.textContent = word;
-
-      highlightedWord.style.backgroundColor = "yellow";
-      highlightedWord.style.display = "inline";
-    }else{
-      console.log("The highlightWord DOM element cant be accessed.")
+      spinner.style.display = "none";
+      const word = event.payload;
+      if(highlightedWord){
+        if (highlightedWord.textContent !== "") {
+            const oldNode = document.createTextNode(highlightedWord.textContent + "");
+            textContainer.insertBefore(oldNode, highlightedWord)
+        }
+        highlightedWord.textContent = word;
+        highlightedWord.style.backgroundColor = "#6393ce";
+        highlightedWord.style.display = "inline";
     }
-
-
     });
 
-
-
-    const result = await invoke("generate_text", {prompt : "Hello!!. Only answer in words. "});
-    unlisten();
+    const result = await invoke("generate_text", {prompt : "I am testing u for my app, speak for soe  time about 300 words"});
     spinner.style.display = "none";
   }
   catch(error)

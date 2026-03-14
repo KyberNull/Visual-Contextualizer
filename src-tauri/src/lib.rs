@@ -5,8 +5,15 @@ use crate::llama::inference::{ContextConfig, GenerationConfig, LlamaPipeline, Ll
 use crate::llama::model::LlamaModel;
 use std::fs;
 use std::env;
+use std::num::NonZeroU32;
 use std::sync::Mutex;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
+use tauri:: Listener;
+use piper_rs::synth::PiperSpeechSynthesizer;
+use rodio::{DeviceSinkBuilder, Player, buffer::SamplesBuffer};
+use std::sync::Arc;
+use std::num::NonZeroU16;
+use std::path::Path;
 
 
 #[tauri::command]
@@ -28,6 +35,10 @@ fn get_img(data: Vec<u8>) -> Result<String, String> {
 struct AppState {
     runtime: LlamaRuntime, // owns llama ackend, lives for app lifetime
     pipeline: Mutex<LlamaPipeline>,
+
+    synth: Arc<PiperSpeechSynthesizer>,
+    audio_player: Arc<Mutex<Player>>,
+    _mixer_sink: rodio::MixerDeviceSink,
 }
 
 impl AppState {
@@ -45,13 +56,88 @@ impl AppState {
         let pipeline = LlamaPipeline::from_model(model, &cfg)?;
 
         println!("Model loaded successfully");
+        
+
+        let mixer_sink = DeviceSinkBuilder::open_default_sink()
+            .map_err(|e| format!("Audio Device Error: {}", e))?;
+        let player = Player::connect_new(mixer_sink.mixer());
+
+        let config_path = env::current_dir().unwrap().join("en_US-libritts_r-medium.onnx.json");
+        let piper_model = piper_rs::from_config_path(&config_path)
+            .map_err(|e| e.to_string())?;
+    
+        let synth = PiperSpeechSynthesizer::new(piper_model)
+            .map_err(|e| e.to_string())?;
 
         Ok(Self {
             runtime,
             pipeline: Mutex::new(pipeline),
+            synth: Arc::new(synth),
+            audio_player: Arc::new(Mutex::new(player)),
+            _mixer_sink: mixer_sink,
+
         })
     }
 }
+
+
+
+
+pub fn setup_voice_engine(app : &AppHandle){
+
+    let handle = app.clone();
+    let word_queue = Arc::new(Mutex::new(Vec::<String>::new()));
+
+    app.listen("got_a_word", move |event| {
+        let word: String = serde_json::from_str(event.payload()).unwrap_or_default();
+        
+        let mut queue = word_queue.lock().unwrap();
+        queue.push(word.clone());
+
+        let is_end = word.contains('.') || word.contains('?') || word.contains('!');
+
+        if queue.len() >= 5 || is_end {
+            let text_to_speak = queue.join(" ");
+            queue.clear();
+
+
+            let state = handle.state::<crate::AppState>();
+            let synth = Arc::clone(&state.synth);
+            let player_lock = Arc::clone(&state.audio_player);
+
+
+            std::thread::spawn(move || {
+                if let Ok(audio_result) = synth.synthesize_parallel(text_to_speak, None) {
+                    let mut samples = Vec::new();
+                    for result in audio_result {
+                        if let Ok(buf) = result {
+                            samples.append(&mut buf.into_vec());
+                        }
+                    }
+
+                    let channels = NonZeroU16::new(1).unwrap();
+                    let rate = NonZeroU32::new(22050).unwrap();
+                    let source = SamplesBuffer::new(channels, rate, samples);
+
+                    if let Ok(player) = player_lock.lock() {
+                        player.append(source);
+                    }
+
+
+
+                }
+            });
+
+        }
+
+    });
+
+}
+
+
+
+
+
 
 #[tauri::command]
 fn generate_text(state: State<AppState>, prompt: String, app : AppHandle) -> Result<String, String> {
@@ -71,6 +157,10 @@ fn generate_text(state: State<AppState>, prompt: String, app : AppHandle) -> Res
     }
 }
 
+
+
+
+
 // Initialise App Stae which loads llama.cpp backend and model, and creates the pipeline.
 // App State exists throughout the entire app lifetime (automatically manages memory).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -83,6 +173,11 @@ pub fn run() {
             generate_text,
             get_img,
         ])
+        .setup(|app| {
+            // Pass the handle to our separate function
+            setup_voice_engine(app.handle());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -122,7 +122,8 @@ body {
 }
 
 .highlighted_word{
-  background-color: yellow;
+  background-color: #6393ce;
+  color: black;
   display: inline-block;
   min-width: 5px;
 }
