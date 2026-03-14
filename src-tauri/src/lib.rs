@@ -1,46 +1,20 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod llama;
 
-use crate::llama::inference::{ContextConfig, GenerationConfig, LlamaPipeline, LlamaRuntime};
+use crate::llama::inference::{resolve_dependency_path, ContextConfig, GenerationConfig, LlamaPipeline, LlamaRuntime};
 use crate::llama::model::LlamaModel;
-use ::serde::Serialize;
+use serde::Serialize;
 use piper_rs::synth::PiperSpeechSynthesizer;
 use rodio::{buffer::SamplesBuffer, DeviceSinkBuilder, Player};
-use std::env;
 use std::fs;
 use std::num::NonZeroU16;
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::Emitter;
 use tauri::Listener;
 use tauri::{AppHandle, Manager, State};
-
-fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
-    let mut candidates = Vec::new();
-
-    if let Ok(cwd) = env::current_dir() {
-        candidates.push(cwd.join(relative));
-    }
-
-    if let Ok(exe) = env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join(relative));
-            if let Some(parent) = exe_dir.parent() {
-                candidates.push(parent.join(relative));
-            }
-        }
-    }
-
-    for candidate in candidates {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(format!("Could not find dependency: {}", relative.display()))
-}
 
 #[tauri::command]
 fn get_img(data: Vec<u8>) -> Result<String, String> {
@@ -59,7 +33,7 @@ fn get_img(data: Vec<u8>) -> Result<String, String> {
 }
 
 struct AppState {
-    runtime: LlamaRuntime, // owns llama ackend, lives for app lifetime
+    _runtime: LlamaRuntime, // owns llama ackend, lives for app lifetime
     pipeline: Mutex<LlamaPipeline>,
 
     synth: Arc<PiperSpeechSynthesizer>,
@@ -69,7 +43,7 @@ struct AppState {
 
 impl AppState {
     fn new() -> Result<Self, String> {
-        let runtime = LlamaRuntime::init();
+        let _runtime = LlamaRuntime::init();
 
         let path =
             resolve_dependency_path(Path::new("Qwen3.5-0.8B-GGUF/Qwen3.5-0.8B-UD-Q4_K_XL.gguf"))?;
@@ -93,7 +67,7 @@ impl AppState {
         let synth = PiperSpeechSynthesizer::new(piper_model).map_err(|e| e.to_string())?;
 
         Ok(Self {
-            runtime,
+            _runtime,
             pipeline: Mutex::new(pipeline),
             synth: Arc::new(synth),
             audio_player: Arc::new(Mutex::new(player)),

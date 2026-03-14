@@ -49,7 +49,7 @@ pub struct ContextConfig {
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            n_ctx: 1024,
+            n_ctx: 1024,  // Max context length
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
             n_threads: num_cpus::get() as i32,
         }
@@ -107,7 +107,7 @@ pub struct LlamaPipeline {
     mtmd_ctx: *mut mtmd_context,
 }
 
-fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
+pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
     if let Ok(cwd) = env::current_dir() {
