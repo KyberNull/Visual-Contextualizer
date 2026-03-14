@@ -1,14 +1,15 @@
 use tauri::AppHandle;
-use tauri:: Emitter;
+use tauri::Emitter;
 
-use crate::llama::template;
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
+use crate::llama::template;
+use num_cpus;
 use std::env;
 use std::ffi::CString;
-use num_cpus;
+use std::path::{Path, PathBuf};
 
-// Structs are made to mirror the C structs in llama.h, but with more Rusty ergonomics where possible. 
+// Structs are made to mirror the C structs in llama.h, but with more Rusty ergonomics where possible.
 // They have default values but let us overwrite them when needed.
 // They also handle all the unsafe calls to the backend and memory management, so the rest of the codebase can be safe and ergonomic.
 
@@ -106,6 +107,31 @@ pub struct LlamaPipeline {
     mtmd_ctx: *mut mtmd_context,
 }
 
+fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+
+    if let Ok(cwd) = env::current_dir() {
+        candidates.push(cwd.join(relative));
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            candidates.push(exe_dir.join(relative));
+            if let Some(parent) = exe_dir.parent() {
+                candidates.push(parent.join(relative));
+            }
+        }
+    }
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!("Could not find dependency: {}", relative.display()))
+}
+
 impl LlamaPipeline {
     pub fn from_model(model: LlamaModel, cfg: &ContextConfig) -> Result<Self, String> {
         let mut cparams = unsafe { llama_context_default_params() };
@@ -113,7 +139,7 @@ impl LlamaPipeline {
         cparams.n_batch = cfg.n_batch;
         cparams.n_ubatch = cfg.n_batch;
         cparams.n_threads = cfg.n_threads;
-        cparams.n_threads_batch = (cfg.n_threads / 2).max(4);;
+        cparams.n_threads_batch = (cfg.n_threads / 2).max(4);
         cparams.kv_unified = true;
         cparams.n_seq_max = 4;
 
@@ -122,8 +148,8 @@ impl LlamaPipeline {
             return Err("Failed to create llama context".to_string());
         }
 
-        let path = env::current_dir().unwrap().join("Qwen3.5-0.8B-GGUF").join("mmproj-BF16.gguf");
-        let path = path.to_str().ok_or("Error")?;
+        let path = resolve_dependency_path(Path::new("Qwen3.5-0.8B-GGUF/mmproj-BF16.gguf"))?;
+        let path = path.to_str().ok_or("Model path contains non-UTF-8 bytes")?;
         let path = CString::new(path).map_err(|_| "Model path contains NUL byte".to_string())?;
 
         let mtmd_params = unsafe { mtmd_context_params_default() };
@@ -146,25 +172,27 @@ impl LlamaPipeline {
             mtmd_ctx,
         })
     }
-    pub fn generate(&mut self, prompt: &str, image_data: Option<Vec<u8>>,cfg: &GenerationConfig, app: AppHandle) -> Result<String, String> {
-
+    pub fn generate(
+        &mut self,
+        prompt: &str,
+        image_data: Option<Vec<u8>>,
+        cfg: &GenerationConfig,
+        app: AppHandle,
+    ) -> Result<String, String> {
         // Clear old context
         unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
         self.reset_sampler(cfg);
 
-
         let bmp: *mut mtmd_bitmap = match image_data.as_ref() {
             Some(bytes) => {
                 let ptr = unsafe {
-                    mtmd_helper_bitmap_init_from_buf(
-                        self.mtmd_ctx,
-                        bytes.as_ptr(),
-                        bytes.len(),
-                    )
+                    mtmd_helper_bitmap_init_from_buf(self.mtmd_ctx, bytes.as_ptr(), bytes.len())
                 };
 
                 if ptr.is_null() {
-                    return Err("Failed to convert image to bitmap: buffer was invalid or corrupted".into());
+                    return Err(
+                        "Failed to convert image to bitmap: buffer was invalid or corrupted".into(),
+                    );
                 }
                 ptr // Return the pointer to be assigned to bmp
             }
@@ -176,17 +204,14 @@ impl LlamaPipeline {
             content: vec![template::Content::Text(SYSTEM_PROMPT.to_string())],
         };
 
-
-        let user_content = if !bmp.is_null(){
-            vec![ 
-                template::Content::Image, 
+        let user_content = if !bmp.is_null() {
+            vec![
+                template::Content::Image,
                 template::Content::Text(format!("\n{}", prompt)),
-
-                ]
-        }else {
+            ]
+        } else {
             vec![template::Content::Text(prompt.to_string())]
         };
-
 
         let user_prompt = template::Message {
             role: template::Role::User,
@@ -206,11 +231,10 @@ impl LlamaPipeline {
             }
         };
 
-
         let mut bitmap_ptrs: Vec<*const mtmd_bitmap> = Vec::new();
         if !bmp.is_null() {
             bitmap_ptrs.push(bmp as *const mtmd_bitmap);
-}
+        }
 
         let chunks: *mut mtmd_input_chunks = unsafe { mtmd_input_chunks_init() };
         if chunks.is_null() {
@@ -224,7 +248,6 @@ impl LlamaPipeline {
             text: c_prompt.as_ptr(),
             add_special: false,
             parse_special: true,
-
         };
 
         let rc = unsafe {
@@ -251,7 +274,16 @@ impl LlamaPipeline {
 
         let mut new_n_past: llama_pos = 0;
         unsafe {
-            let success = mtmd_helper_eval_chunks(self.mtmd_ctx, self.ctx, chunks, 0, 0, 512, true, &mut new_n_past);
+            let success = mtmd_helper_eval_chunks(
+                self.mtmd_ctx,
+                self.ctx,
+                chunks,
+                0,
+                0,
+                512,
+                true,
+                &mut new_n_past,
+            );
             if success != 0 {
                 mtmd_input_chunks_free(chunks);
                 if !bmp.is_null() {
@@ -264,8 +296,6 @@ impl LlamaPipeline {
             if !bmp.is_null() {
                 mtmd_bitmap_free(bmp);
             }
-            
-
         }
 
         let stop_seq = "<|endoftext|><|im_start|>";
@@ -276,7 +306,7 @@ impl LlamaPipeline {
         let mut current_pos = new_n_past;
         // After prompt/chunk eval, logits_last=true gives one logits row to sample from.
         // Sample from logits index 0, not absolute token position.
-        let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1)};
+        let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1) };
         let mut word_buffer = String::new();
 
         for _ in 0..cfg.max_tokens {
@@ -285,9 +315,6 @@ impl LlamaPipeline {
                 break;
             }
 
-
-
-            
             let piece = &self.model.token_to_piece(token)?;
             out.push_str(piece);
 
@@ -296,7 +323,7 @@ impl LlamaPipeline {
             // Check if stop sequence appeared
             if let Some(idx) = out.find(stop_seq) {
                 out.truncate(idx); // remove the stop sequence and anything after
-                
+
                 // Calculate how many characters from the end of word_buffer to remove
                 if let Some(wb_idx) = word_buffer.rfind(stop_seq) {
                     word_buffer.truncate(wb_idx);
@@ -305,15 +332,12 @@ impl LlamaPipeline {
             }
 
             if let Some((_before, _after)) = word_buffer.split_once(' ') {
-
                 while let Some((before, after)) = word_buffer.split_once(' ') {
                     let completed_word = format!("{} ", before);
                     word_buffer = after.to_string();
                     let _ = app.emit("got_a_word", completed_word);
                 }
-            
             }
-
 
             unsafe { llama_sampler_accept(self.sampler, token) };
 
@@ -340,18 +364,16 @@ impl LlamaPipeline {
             }
 
             current_pos += 1;
-            token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1)};
-
+            token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1) };
         }
 
-        if !word_buffer.is_empty()
-        {
+        if !word_buffer.is_empty() {
             let _ = app.emit("got_a_word", word_buffer);
         }
         Ok(out)
     }
 
-// TODO: Improve sampling strategy
+    // TODO: Improve sampling strategy
     fn reset_sampler(&mut self, cfg: &GenerationConfig) {
         if !self.sampler.is_null() {
             unsafe { llama_sampler_free(self.sampler) };
@@ -360,7 +382,7 @@ impl LlamaPipeline {
 
         let mut sampler_config = unsafe { llama_sampler_chain_default_params() };
         sampler_config.no_perf = true; // Disable perf logging for cleaner output, and because we don't need it for generation.
-        
+
         self.sampler = unsafe { llama_sampler_chain_init(sampler_config) };
         if self.sampler.is_null() {
             return;
@@ -372,7 +394,10 @@ impl LlamaPipeline {
         }
 
         unsafe {
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_penalties(64, cfg.repitition_penalty, 0.0, cfg.presence_penalty) );
+            llama_sampler_chain_add(
+                self.sampler,
+                llama_sampler_init_penalties(64, cfg.repitition_penalty, 0.0, cfg.presence_penalty),
+            );
             llama_sampler_chain_add(self.sampler, llama_sampler_init_temp(cfg.temperature));
             llama_sampler_chain_add(self.sampler, llama_sampler_init_top_k(cfg.top_k));
             llama_sampler_chain_add(self.sampler, llama_sampler_init_top_p(cfg.top_p, 1));
