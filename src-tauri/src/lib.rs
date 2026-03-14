@@ -3,22 +3,22 @@ mod llama;
 
 use crate::llama::inference::{resolve_dependency_path, ContextConfig, GenerationConfig, LlamaPipeline, LlamaRuntime};
 use crate::llama::model::LlamaModel;
-use serde::Serialize;
 use piper_rs::synth::PiperSpeechSynthesizer;
 use rodio::{buffer::SamplesBuffer, DeviceSinkBuilder, Player};
+use std::num::NonZeroU16;
+use screenshots::Screen;
+use screenshots::image::ImageFormat;
+use serde::Serialize;
+use std::io::Cursor;
+use std::thread;
+use std::time::Duration;
+use std::path::Path;
 use std::fs;
 use std::env;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Listener, LogicalSize, Manager, Size, State};
-use std::num::NonZeroU16;
-use screenshots::Screen;
-use screenshots::image::ImageFormat;
-use std::io::Cursor;
-use std::thread;
-use std::time::Duration;
-use std::path::Path;
 
 
 #[tauri::command]
