@@ -132,8 +132,8 @@ fn get_img(data: Vec<u8>) -> Result<String, String> {
 }
 
 struct AppState {
-    _runtime: LlamaRuntime, // owns llama ackend, lives for app lifetime
-    pipeline: Mutex<LlamaPipeline>,
+    _runtime: LlamaRuntime, // owns llama backend, lives for app lifetime
+    pipeline: Mutex<LlamaPipeline>, // pipeline is the real workhorse
 
     synth: Arc<PiperSpeechSynthesizer>,
     audio_player: Arc<Mutex<Player>>,
@@ -142,6 +142,7 @@ struct AppState {
 
 impl AppState {
     fn new() -> Result<Self, String> {
+        // Initialises the GGML Backends and Kernels
         let _runtime = LlamaRuntime::init();
 
         //Finding model with the relative path
