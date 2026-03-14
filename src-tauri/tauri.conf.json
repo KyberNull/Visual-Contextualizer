@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "identifier": "io.github.KyberNull.visual-contextualizer",
   "build": {
+    "afterBuildCommand": "SKIP_TAURI_BUILD=1 bash ../scripts/package-portable.sh",
     "frontendDist": "../src"
   },
   "app": {
