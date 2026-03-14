@@ -121,10 +121,8 @@ impl LlamaContextHandle {
         Ok(Self { ptr })
     }
 
-    pub(super) fn into_raw(mut self) -> *mut llama_context {
-        let ptr = self.ptr;
-        self.ptr = std::ptr::null_mut();
-        ptr
+    pub(super) fn as_ptr(&self) -> *mut llama_context {
+        self.ptr
     }
 }
 
@@ -151,10 +149,8 @@ impl MtmdContextHandle {
         Ok(Self { ptr })
     }
 
-    pub(super) fn into_raw(mut self) -> *mut mtmd_context {
-        let ptr = self.ptr;
-        self.ptr = std::ptr::null_mut();
-        ptr
+    pub(super) fn as_ptr(&self) -> *mut mtmd_context {
+        self.ptr
     }
 }
 

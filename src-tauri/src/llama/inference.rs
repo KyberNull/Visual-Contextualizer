@@ -128,9 +128,9 @@ pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
 // Actual generation engine
 pub struct LlamaPipeline {
     model: LlamaModel,
-    ctx: *mut llama_context,
+    ctx: LlamaContextHandle,
     sampler: Option<LlamaSamplerHandle>,
-    mtmd_ctx: *mut mtmd_context,
+    mtmd_ctx: MtmdContextHandle,
 }
 
 impl LlamaPipeline {
@@ -155,9 +155,9 @@ impl LlamaPipeline {
 
         Ok(Self {
             model,
-            ctx: ctx.into_raw(),
+            ctx,
             sampler: Some(sampler),
-            mtmd_ctx: mtmd_ctx.into_raw(),
+            mtmd_ctx,
         })
     }
 
@@ -169,7 +169,7 @@ impl LlamaPipeline {
         app: AppHandle,
     ) -> Result<String, String> {
         // Clear old context
-        unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
+        unsafe { llama_memory_clear(llama_get_memory(self.ctx.as_ptr()), true) };
         self.reset_sampler(cfg)?;
         let sampler_ptr = self
             .sampler
@@ -177,14 +177,25 @@ impl LlamaPipeline {
             .map(LlamaSamplerHandle::as_ptr)
             .ok_or("Sampler is not initialized")?;
 
-        let bmp = MtmdBitmap::from_bytes(self.mtmd_ctx, image_data.as_deref())?;
+        let bmp = MtmdBitmap::from_bytes(self.mtmd_ctx.as_ptr(), image_data.as_deref())?;
+        let formatted_prompt = Self::build_messages(prompt, !bmp.is_null());
 
+        let c_prompt = match CString::new(formatted_prompt) {
+            Ok(v) => v,
+            Err(_) => return Err("Nul byte found in string".to_string()),
+        };
+
+        let new_n_past = self.tokenize_and_eval(&bmp, &c_prompt)?;
+        self.decode_tokens(sampler_ptr, new_n_past, cfg, &app)
+    }
+
+    fn build_messages(prompt: &str, has_image: bool) -> String {
         let system_prompt = template::Message {
             role: template::Role::System,
             content: vec![template::Content::Text(SYSTEM_PROMPT.to_string())],
         };
 
-        let user_content = if !bmp.is_null() {
+        let user_content = if has_image {
             vec![
                 template::Content::Image,
                 template::Content::Text(format!("\n{}", prompt)),
@@ -199,13 +210,10 @@ impl LlamaPipeline {
         };
 
         let prompt = [system_prompt, user_prompt];
-        let formatted_prompt = template::render(&prompt);
+        template::render(&prompt)
+    }
 
-        let c_prompt = match CString::new(formatted_prompt) {
-            Ok(v) => v,
-            Err(_) => return Err("Nul byte found in string".to_string()),
-        };
-
+    fn tokenize_and_eval(&self, bmp: &MtmdBitmap, c_prompt: &CString) -> Result<llama_pos, String> {
         let mut bitmap_ptrs: Vec<*const mtmd_bitmap> = Vec::new();
         if !bmp.is_null() {
             bitmap_ptrs.push(bmp.as_const_ptr());
@@ -221,7 +229,7 @@ impl LlamaPipeline {
 
         let rc = unsafe {
             mtmd_tokenize(
-                self.mtmd_ctx,
+                self.mtmd_ctx.as_ptr(),
                 chunks.as_mut_ptr(),
                 &input_text,
                 if bitmap_ptrs.is_empty() {
@@ -240,8 +248,8 @@ impl LlamaPipeline {
         let mut new_n_past: llama_pos = 0;
         unsafe {
             let success = mtmd_helper_eval_chunks(
-                self.mtmd_ctx,
-                self.ctx,
+                self.mtmd_ctx.as_ptr(),
+                self.ctx.as_ptr(),
                 chunks.as_mut_ptr(),
                 0,
                 0,
@@ -254,15 +262,24 @@ impl LlamaPipeline {
             }
         }
 
+        Ok(new_n_past)
+    }
+
+    fn decode_tokens(
+        &mut self,
+        sampler_ptr: *mut llama_sampler,
+        mut current_pos: llama_pos,
+        cfg: &GenerationConfig,
+        app: &AppHandle,
+    ) -> Result<String, String> {
         let stop_seq = "<|endoftext|><|im_start|>";
         let eos = self.model.eos_token();
 
         // ---- generation loop ----
         let mut out = String::new();
-        let mut current_pos = new_n_past;
         // After prompt/chunk eval, logits_last=true gives one logits row to sample from.
         // Sample from logits index 0, not absolute token position.
-        let mut token = unsafe { llama_sampler_sample(sampler_ptr, self.ctx, -1) };
+        let mut token = unsafe { llama_sampler_sample(sampler_ptr, self.ctx.as_ptr(), -1) };
         let mut word_buffer = String::new();
 
         for _ in 0..cfg.max_tokens {
@@ -287,32 +304,36 @@ impl LlamaPipeline {
                 break;
             }
 
-            if let Some((_before, _after)) = word_buffer.split_once(' ') {
-                while let Some((before, after)) = word_buffer.split_once(' ') {
-                    let completed_word = format!("{} ", before);
-                    word_buffer = after.to_string();
-                    let _ = app.emit("got_a_word", completed_word);
-                }
-            }
+            Self::emit_completed_words(app, &mut word_buffer);
 
             unsafe { llama_sampler_accept(sampler_ptr, token) };
 
             // ---- decode generated token ----
             let batch = LlamaBatch::single_token(token, current_pos);
-            let rc = unsafe { llama_decode(self.ctx, batch.as_raw()) };
+            let rc = unsafe { llama_decode(self.ctx.as_ptr(), batch.as_raw()) };
 
             if rc != 0 {
                 return Err(format!("Decode failed while generating with code {rc}"));
             }
 
             current_pos += 1;
-            token = unsafe { llama_sampler_sample(sampler_ptr, self.ctx, -1) };
+            token = unsafe { llama_sampler_sample(sampler_ptr, self.ctx.as_ptr(), -1) };
         }
 
         if !word_buffer.is_empty() {
             let _ = app.emit("got_a_word", word_buffer);
         }
         Ok(out)
+    }
+
+    fn emit_completed_words(app: &AppHandle, word_buffer: &mut String) {
+        if let Some((_before, _after)) = word_buffer.split_once(' ') {
+            while let Some((before, after)) = word_buffer.split_once(' ') {
+                let completed_word = format!("{} ", before);
+                *word_buffer = after.to_string();
+                let _ = app.emit("got_a_word", completed_word);
+            }
+        }
     }
 
     // TODO: Improve sampling strategy
@@ -340,19 +361,6 @@ impl LlamaPipeline {
 
         self.sampler = Some(sampler);
         Ok(())
-    }
-}
-
-impl Drop for LlamaPipeline {
-    fn drop(&mut self) {
-        if !self.mtmd_ctx.is_null() {
-            unsafe { mtmd_free(self.mtmd_ctx) };
-            self.mtmd_ctx = std::ptr::null_mut();
-        }
-        if !self.ctx.is_null() {
-            unsafe { llama_free(self.ctx) };
-            self.ctx = std::ptr::null_mut();
-        }
     }
 }
 
