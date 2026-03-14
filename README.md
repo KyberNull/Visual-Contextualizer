@@ -22,10 +22,12 @@ The app uses a Rust Foreign function Interface (FFI) with llama.cpp for model or
 
 ## User Experience Highlights
 
+- Trigers 
 - Real-time streaming output for immediate feedback and TTS
 - Clean interface optimized for readability and narration-first flow.
 - Works with both upload button and Global Hotkey.
 - Focus on practical clarity over visual noise.
+- Model understands upto 201 languages.
 
 ## Summary
 
@@ -37,4 +39,8 @@ Visual Contextualizer combines Rust performance, Tauri portability, and vanilla 
 
 2. Extract the downloaded archive and run the executable file inside. (On Linux, you may need to give it execute permissions first with `chmod +x <filename>`)
 
-# Contributing
+# TODOs
+
+- [ ] Add support for linking against BLAS libraries for faster matrix operations in llama.cpp.
+- [ ] Make a cleaner interface for the Rust wrapper around llama.cpp, with better error handling and more ergonomic APIs.
+- [ ] Add support for custom sampling parameters and system prompts in the frontend.
