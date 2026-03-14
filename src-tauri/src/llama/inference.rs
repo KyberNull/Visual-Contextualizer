@@ -49,7 +49,7 @@ impl Default for ContextConfig {
         Self {
             n_ctx: 1024,                       // Max context length
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
-            n_threads: num_cpus::get() as i32, // Chooses threads used by llama based on cpu logical cores
+            n_threads: 6
         }
     }
 }
@@ -133,6 +133,33 @@ impl Drop for MtmdBitmap {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
             unsafe { mtmd_bitmap_free(self.ptr) };
+            self.ptr = std::ptr::null_mut();
+        }
+    }
+}
+
+struct MtmdInputChunks {
+    ptr: *mut mtmd_input_chunks,
+}
+
+impl MtmdInputChunks {
+    fn new() -> Result<Self, String> {
+        let ptr = unsafe { mtmd_input_chunks_init() };
+        if ptr.is_null() {
+            return Err("Failed to initialize mtmd chunks".to_string());
+        }
+        Ok(Self { ptr })
+    }
+
+    fn as_mut_ptr(&self) -> *mut mtmd_input_chunks {
+        self.ptr
+    }
+}
+
+impl Drop for MtmdInputChunks {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            unsafe { mtmd_input_chunks_free(self.ptr) };
             self.ptr = std::ptr::null_mut();
         }
     }
@@ -258,10 +285,7 @@ impl LlamaPipeline {
             bitmap_ptrs.push(bmp.as_const_ptr());
         }
 
-        let chunks: *mut mtmd_input_chunks = unsafe { mtmd_input_chunks_init() };
-        if chunks.is_null() {
-            return Err("Failed to initialize mtmd chunks".to_string());
-        }
+        let chunks = MtmdInputChunks::new()?;
 
         let input_text = mtmd_input_text {
             text: c_prompt.as_ptr(),
@@ -272,7 +296,7 @@ impl LlamaPipeline {
         let rc = unsafe {
             mtmd_tokenize(
                 self.mtmd_ctx,
-                chunks,
+                chunks.as_mut_ptr(),
                 &input_text,
                 if bitmap_ptrs.is_empty() {
                     std::ptr::null_mut()
@@ -284,7 +308,6 @@ impl LlamaPipeline {
         };
 
         if rc != 0 {
-            unsafe { mtmd_input_chunks_free(chunks) };
             return Err(format!("mtmd_tokenization failed : {}", rc));
         }
 
@@ -293,7 +316,7 @@ impl LlamaPipeline {
             let success = mtmd_helper_eval_chunks(
                 self.mtmd_ctx,
                 self.ctx,
-                chunks,
+                chunks.as_mut_ptr(),
                 0,
                 0,
                 512,
@@ -301,11 +324,8 @@ impl LlamaPipeline {
                 &mut new_n_past,
             );
             if success != 0 {
-                mtmd_input_chunks_free(chunks);
                 return Err("MTMD Eval Failed: Projector or MTMD Error".into());
             }
-
-            mtmd_input_chunks_free(chunks);
         }
 
         let stop_seq = "<|endoftext|><|im_start|>";
