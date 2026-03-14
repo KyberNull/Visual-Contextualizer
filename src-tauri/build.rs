@@ -12,7 +12,7 @@ fn main() {
         .define("LLAMA_BUILD_TESTS", "OFF")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
         .define("GGML_NATIVE", "ON")
-        .define("BUILD_SHARED_LIBS", "ON")
+        .define("LLAMA_BUILD_TOOLS", "ON")
         .profile("Release")
         .build();
 
@@ -23,7 +23,9 @@ fn main() {
     // Create rust bindings
     let bindings = bindgen::Builder::default()
         .header("llama_cpp/include/llama.h")
+        .header("llama_cpp/tools/mtmd/mtmd.h")
         .clang_arg(format!("-I{}", dst.join("include").display()))
+        .clang_arg(format!("-I{}", dst.join("tools/mtmd").display()))
         .generate()
         .expect("Unable to generate bindings");
 
