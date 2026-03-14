@@ -1,34 +1,63 @@
 const { invoke } = window.__TAURI__.core;
 const { register } = window.__TAURI__.globalShortcut;
-const {listen} = window.__TAURI__.event;
+const { listen } = window.__TAURI__.event;
 
-async function resizeImageTo1024x1024(file) {
+const MODEL_IMAGE_SIZE = 448; 
+const SNIP_PROMPT = "Describe the image.";
+
+
+async function handleImageUploadToRust(file) {
+  const textContainer = document.getElementById("model_output_text");
+  const spinner = document.getElementById("status_spinner");
+
+  if (!file) return;
+  try {
+    const resizedImageBytes = await resizeFileToModelBytes(file);
+    if (textContainer) {
+      textContainer.innerHTML = ''; 
+      ensureHighlightSpan(textContainer);
+    }
+    if (spinner) spinner.style.display = "block";
+    await invoke("generate_text", {
+      prompt: typeof SNIP_PROMPT !== 'undefined' ? SNIP_PROMPT : "Describe the image.",
+      imageBytes: resizedImageBytes
+    });
+    finalizeUI(textContainer, spinner);
+  } catch (err) {
+    console.error("Upload process failed:", err);
+    if (spinner) spinner.style.display = "none";
+  }
+}
+
+
+function finalizeUI(textContainer, spinner) {
+  if (spinner) spinner.style.display = "none";
+  if (!textContainer) return;
+  const currentHighlight = textContainer.querySelector(".highlighted_word");
+  if (currentHighlight) {
+    currentHighlight.style.backgroundColor = "transparent";
+    currentHighlight.style.color = "inherit";
+    currentHighlight.classList.remove("highlighted_word");
+  }
+  textContainer.scrollTop = textContainer.scrollHeight;
+}
+
+
+async function resizeFileToModelBytes(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => {
+    img.onload = async () => {
       const canvas = document.createElement('canvas');
+      canvas.width = MODEL_IMAGE_SIZE;
+      canvas.height = MODEL_IMAGE_SIZE;
       const ctx = canvas.getContext('2d');
-      canvas.width = 448;
-      canvas.height = 448;
+      ctx.drawImage(img, 0, 0, MODEL_IMAGE_SIZE, MODEL_IMAGE_SIZE);
       
-      // Calculate scaling to fit inside 448x448 while maintaining aspect ratio
-      const scale = Math.min(448 / img.width, 448 / img.height);
-      const scaledWidth = img.width * scale;
-      const scaledHeight = img.height * scale;
-      
-      // Center the image
-      const x = (448 - scaledWidth) / 2;
-      const y = (448 - scaledHeight) / 2;
-      
-      ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
-      
-      canvas.toBlob((blob) => {
-        if (blob) {
-          resolve(blob);
-        } else {
-          reject(new Error('Failed to create blob'));
-        }
-      }, 'image/jpeg', 0.9);
+      canvas.toBlob(async (blob) => {
+        const arrayBuffer = await blob.arrayBuffer();
+        resolve(Array.from(new Uint8Array(arrayBuffer)));
+      }, 'image/png');
+      URL.revokeObjectURL(img.src);
     };
     img.onerror = reject;
     img.src = URL.createObjectURL(file);
@@ -39,116 +68,141 @@ function ensureHighlightSpan(textContainer) {
   if (!textContainer) return null;
   let highlighted = textContainer.querySelector(".highlighted_word");
   if (!highlighted) {
-    textContainer.innerHTML = '<span class="highlighted_word"></span>';
-    highlighted = textContainer.querySelector(".highlighted_word");
+    const span = document.createElement("span");
+    span.className = "highlighted_word";
+    span.style.padding = "0 2px";
+    span.style.borderRadius = "2px";
+    textContainer.appendChild(span);
+    highlighted = span;
   }
   return highlighted;
 }
 
-
-async function handleImageUploadToRust(file)
-{
-  if(!file)
-  {
-    alert("Please select a file");
-    return;
-  }
-
+async function startNativeSnip() {
+  const overlay = document.getElementById('snip-overlay');
+  const bgCanvas = document.getElementById('bg-canvas');
+  const drawCanvas = document.getElementById('draw-canvas');
+  const mainUi = document.querySelector(".main_ui");
+  const topbar = document.querySelector(".topbar");
   const spinner = document.getElementById("status_spinner");
   const textContainer = document.getElementById("model_output_text");
 
+  if (!overlay || !bgCanvas || !drawCanvas) return;
 
-  try{
-    // Resize image to 1024x1024 using Canvas
-    const resizedBlob = await resizeImageTo1024x1024(file);
-    const arrayBuffer = await resizedBlob.arrayBuffer();
+  const bctx = bgCanvas.getContext('2d');
+  const dctx = drawCanvas.getContext('2d', { alpha: false });
+
+  const restoreNormalUi = async () => {
+    try { await invoke("reset_window_to_initial_size"); } catch (err) {}
+    overlay.style.display = "none";
+    if (mainUi) mainUi.style.visibility = "visible";
+    if (topbar) topbar.style.visibility = "visible";
+  };
+
+  try {
+    if (mainUi) mainUi.style.visibility = "hidden";
+    if (topbar) topbar.style.visibility = "hidden";
+
+    const bytes = await invoke("capture_hidden_window_screenshot");
+    await new Promise((resolve) => setTimeout(resolve, 180));
+
+    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.src = URL.createObjectURL(blob);
+    });
+
+    bgCanvas.width = drawCanvas.width = window.innerWidth;
+    bgCanvas.height = drawCanvas.height = window.innerHeight;
+    bctx.drawImage(img, 0, 0, bgCanvas.width, bgCanvas.height);
+    URL.revokeObjectURL(img.src);
     
-    const uintArray = new Uint8Array(arrayBuffer);
-    const imageBytes = Array.from(uintArray);
+    overlay.style.display = 'block';
+    dctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    dctx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
 
+    let startX, startY, isDragging = false;
+    drawCanvas.onmousedown = (e) => { isDragging = true; startX = e.clientX; startY = e.clientY; };
+    drawCanvas.onmousemove = (e) => {
+      if (!isDragging) return;
+      dctx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      dctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      dctx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
+      dctx.clearRect(startX, startY, e.clientX - startX, e.clientY - startY);
+      dctx.strokeStyle = "#6393ce";
+      dctx.lineWidth = 2;
+      dctx.strokeRect(startX, startY, e.clientX - startX, e.clientY - startY);
+    };
 
-    if (textContainer) {
-      textContainer.innerHTML = '<span class="highlighted_word"></span>';
-    }
-    spinner.style.display = "block";
+    drawCanvas.onmouseup = async (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      const rectX = Math.min(startX, e.clientX);
+      const rectY = Math.min(startY, e.clientY);
+      const rectW = Math.abs(e.clientX - startX);
+      const rectH = Math.abs(e.clientY - startY);
+      await restoreNormalUi();
+      if (rectW < 10 || rectH < 10) return;
 
-    const result = await invoke("generate_text", {prompt : "Describe the image", imageBytes});
-    console.log("Generation complete:", result);
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = finalCanvas.height = MODEL_IMAGE_SIZE;
+      finalCanvas.getContext('2d').drawImage(bgCanvas, rectX, rectY, rectW, rectH, 0, 0, MODEL_IMAGE_SIZE, MODEL_IMAGE_SIZE);
+      
+      const resizedBlob = await new Promise(res => finalCanvas.toBlob(res, 'image/png'));
+      const arrayBuffer = await resizedBlob.arrayBuffer();
+      const resizedImageBytes = Array.from(new Uint8Array(arrayBuffer));
 
-    // Fallback: if streaming events are delayed/missed, still show final output.
-    const hasRenderedText = !!(textContainer && textContainer.textContent && textContainer.textContent.trim());
-    if (!hasRenderedText && typeof result === "string" && result.trim() !== "") {
-      textContainer.textContent = result;
-    }
-  }
-  catch (error)
-  {
-    console.error("Error durin image processing: ", error);
-    alert("Check console for error");
-  }
-  finally{
-    spinner.style.display = "none";
-  }
+      if (textContainer) { textContainer.innerHTML = ''; ensureHighlightSpan(textContainer); }
+      if (spinner) spinner.style.display = "block";
+
+      try {
+        await invoke("generate_text", { prompt: SNIP_PROMPT, imageBytes: resizedImageBytes });
+        finalizeUI(textContainer, spinner);
+      } catch (err) { console.error(err); }
+    };
+  } catch (err) { await restoreNormalUi(); }
 }
 
-
-
-
 window.addEventListener("DOMContentLoaded", async() => {  
-  //Implementing default dark theme
-  const isDark = document.body.classList.toggle("dark-theme")
-
+  document.body.classList.toggle("dark-theme");
   const textContainer = document.getElementById("model_output_text");
   const spinner = document.getElementById("status_spinner");
+  await listen("got_a_word", (event) => {
+    if (spinner) spinner.style.display = "none";
+    const word = event.payload ?? "";
+    const highlightedWord = ensureHighlightSpan(textContainer);
+    
+    if (highlightedWord && textContainer) {
+      if (highlightedWord.textContent !== "") {
+        textContainer.insertBefore(document.createTextNode(highlightedWord.textContent), highlightedWord);
+      }      
+      highlightedWord.textContent = word;
+      highlightedWord.style.backgroundColor = "#6393ce";
+      highlightedWord.style.color = "white";
+      highlightedWord.style.display = "inline";
+      textContainer.scrollTop = textContainer.scrollHeight;
+    }
+  });
 
-  try {
-    await listen("tts_word", (event) => {
-      spinner.style.display = "none";
-      const word = event.payload?.word ?? "";
-      const highlightedWord = ensureHighlightSpan(textContainer);
-      if (highlightedWord && textContainer) {
-        if (highlightedWord.textContent !== "") {
-          const oldNode = document.createTextNode(highlightedWord.textContent + " ");
-          textContainer.insertBefore(oldNode, highlightedWord);
-        }
-        highlightedWord.textContent = word;
-        highlightedWord.style.backgroundColor = "#6393ce";
-        highlightedWord.style.display = "inline";
-      }
-    });
-  } catch (error) {
-    console.log("Failed to attach tts_word listener:", error);
-  }
+  await register('CommandOrControl+Shift+N', (event) => {
+    if(event.state == "Pressed") void startNativeSnip();
+  });
 
-  try {
-    await register('CommandOrControl+Shift+N', (event) => {
-      if(event.state == "Pressed"){
-        console.log('Shortcut triggered');
-      }
-    });
-  } catch (error) {
-    console.log("Shortcut registration failed:", error);
-  }
-
-  const darkThemeButton = document.querySelector(".dark_mode_container");
-  const darkThemeImage = document.querySelector(".dark_mode_image");
-
-  if (darkThemeButton && darkThemeImage) {
-    darkThemeButton.addEventListener("click", () => {
-      const isDark = document.body.classList.toggle("dark-theme");
-      
-      darkThemeImage.textContent = isDark ? "Light" : "Dark";
-    });
-  }
   const uploadBtn = document.querySelector(".image_button");
   const fileInput = document.querySelector("#file_input");
-  
   if (uploadBtn && fileInput) {
     uploadBtn.addEventListener("click", () => fileInput.click());
-
-    fileInput.addEventListener("change", async()=>{
-          const file = fileInput.files[0];
-          await handleImageUploadToRust(file);
-    })
+    fileInput.addEventListener("change", async() => {
+      const file = fileInput.files[0];
+      await handleImageUploadToRust(file);
+    });
   }
 });
+
+
+
+const darkThemeButton = document.querySelector("dark_mode_image");
+window.addEventListener("click", () => {
+    document.body.classList.toggle("dark-theme");
+})

@@ -9,8 +9,13 @@
   </head>
 
   <body>
+    <div id="snip-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:10000;">
+      <canvas id="bg-canvas" style="position:absolute; top:0; left:0;"></canvas>
+      <canvas id="draw-canvas" style="position:absolute; top:0; left:0; cursor:crosshair;"></canvas>
+    </div>
+
     <div class="topbar">
-            <div class="settings">
+      <div class="settings">
         <div class="settings_image_container">
           <div class="settings_image">Settings</div>
         </div>
@@ -24,13 +29,14 @@
     
     <div class="main_ui">
       <div id="result_container" class="output_box">
-        <p id="model_output_text"><span class = "highlighted_word"></span></p>
+        <p id="model_output_text"><span class="highlighted_word"></span></p>
       </div>
       <div class="loader" id="status_spinner" style="display: none;"></div>
     </div>
 
     <div class="image_button">
-      <input type="file" id="file_input" accept="image/png, image/jpeg" style="display: none;">Click to Upload Image</div>
+      <input type="file" id="file_input" accept="image/png, image/jpeg" style="display: none;">
+      Click to Upload Image
     </div>
 
   </body>

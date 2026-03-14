@@ -11,8 +11,6 @@
     "windows": [
       {
         "title": "Visual Contextualizer",
-        "resizable": false,
-        "fullscreen": false,
         "width": 400,
         "height": 600
       }
