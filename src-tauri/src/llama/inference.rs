@@ -262,18 +262,18 @@ struct LlamaSamplerHandle {
 }
 
 impl LlamaSamplerHandle {
-    fn new_default() -> Result<Self, String> {
-        let ptr = unsafe { llama_sampler_chain_init(llama_sampler_chain_default_params()) };
+    fn new(no_perf: bool) -> Result<Self, String> {
+        let mut params = unsafe { llama_sampler_chain_default_params() };
+        params.no_perf = no_perf;
+        let ptr = unsafe { llama_sampler_chain_init(params) };
         if ptr.is_null() {
             return Err("Failed to create sampler chain".to_string());
         }
         Ok(Self { ptr })
     }
 
-    fn into_raw(mut self) -> *mut llama_sampler {
-        let ptr = self.ptr;
-        self.ptr = std::ptr::null_mut();
-        ptr
+    fn as_ptr(&self) -> *mut llama_sampler {
+        self.ptr
     }
 }
 
@@ -315,7 +315,7 @@ pub fn resolve_dependency_path(relative: &Path) -> Result<PathBuf, String> {
 pub struct LlamaPipeline {
     model: LlamaModel,
     ctx: *mut llama_context,
-    sampler: *mut llama_sampler,
+    sampler: Option<LlamaSamplerHandle>,
     mtmd_ctx: *mut mtmd_context,
 }
 
@@ -337,12 +337,12 @@ impl LlamaPipeline {
         let path = CString::new(path).map_err(|_| "Model path contains NUL byte".to_string())?;
 
         let mtmd_ctx = MtmdContextHandle::from_file(path.as_ptr(), model.ptr)?;
-        let sampler = LlamaSamplerHandle::new_default()?;
+        let sampler = LlamaSamplerHandle::new(true)?;
 
         Ok(Self {
             model,
             ctx: ctx.into_raw(),
-            sampler: sampler.into_raw(),
+            sampler: Some(sampler),
             mtmd_ctx: mtmd_ctx.into_raw(),
         })
     }
@@ -356,7 +356,12 @@ impl LlamaPipeline {
     ) -> Result<String, String> {
         // Clear old context
         unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
-        self.reset_sampler(cfg);
+        self.reset_sampler(cfg)?;
+        let sampler_ptr = self
+            .sampler
+            .as_ref()
+            .map(LlamaSamplerHandle::as_ptr)
+            .ok_or("Sampler is not initialized")?;
 
         let bmp = MtmdBitmap::from_bytes(self.mtmd_ctx, image_data.as_deref())?;
 
@@ -443,7 +448,7 @@ impl LlamaPipeline {
         let mut current_pos = new_n_past;
         // After prompt/chunk eval, logits_last=true gives one logits row to sample from.
         // Sample from logits index 0, not absolute token position.
-        let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1) };
+        let mut token = unsafe { llama_sampler_sample(sampler_ptr, self.ctx, -1) };
         let mut word_buffer = String::new();
 
         for _ in 0..cfg.max_tokens {
@@ -476,7 +481,7 @@ impl LlamaPipeline {
                 }
             }
 
-            unsafe { llama_sampler_accept(self.sampler, token) };
+            unsafe { llama_sampler_accept(sampler_ptr, token) };
 
             // ---- decode generated token ----
             let batch = LlamaBatch::single_token(token, current_pos);
@@ -487,7 +492,7 @@ impl LlamaPipeline {
             }
 
             current_pos += 1;
-            token = unsafe { llama_sampler_sample(self.sampler, self.ctx, -1) };
+            token = unsafe { llama_sampler_sample(sampler_ptr, self.ctx, -1) };
         }
 
         if !word_buffer.is_empty() {
@@ -497,45 +502,35 @@ impl LlamaPipeline {
     }
 
     // TODO: Improve sampling strategy
-    fn reset_sampler(&mut self, cfg: &GenerationConfig) {
-        if !self.sampler.is_null() {
-            unsafe { llama_sampler_free(self.sampler) };
-            self.sampler = std::ptr::null_mut();
-        }
-
-        let mut sampler_config = unsafe { llama_sampler_chain_default_params() };
-        sampler_config.no_perf = true; // Disable perf logging for cleaner output, and because we don't need it for generation.
-
-        self.sampler = unsafe { llama_sampler_chain_init(sampler_config) };
-        if self.sampler.is_null() {
-            return;
-        }
+    fn reset_sampler(&mut self, cfg: &GenerationConfig) -> Result<(), String> {
+        let sampler = LlamaSamplerHandle::new(true)?;
+        let sampler_ptr = sampler.as_ptr();
 
         if cfg.temperature <= 0.0 {
-            unsafe { llama_sampler_chain_add(self.sampler, llama_sampler_init_greedy()) };
-            return;
+            unsafe { llama_sampler_chain_add(sampler_ptr, llama_sampler_init_greedy()) };
+            self.sampler = Some(sampler);
+            return Ok(());
         }
 
         unsafe {
             llama_sampler_chain_add(
-                self.sampler,
+                sampler_ptr,
                 llama_sampler_init_penalties(64, cfg.repitition_penalty, 0.0, cfg.presence_penalty),
             );
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_temp(cfg.temperature));
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_top_k(cfg.top_k));
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_top_p(cfg.top_p, 1));
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_min_p(cfg.min_p, 0));
-            llama_sampler_chain_add(self.sampler, llama_sampler_init_dist(cfg.seed));
+            llama_sampler_chain_add(sampler_ptr, llama_sampler_init_temp(cfg.temperature));
+            llama_sampler_chain_add(sampler_ptr, llama_sampler_init_top_k(cfg.top_k));
+            llama_sampler_chain_add(sampler_ptr, llama_sampler_init_top_p(cfg.top_p, 1));
+            llama_sampler_chain_add(sampler_ptr, llama_sampler_init_min_p(cfg.min_p, 0));
+            llama_sampler_chain_add(sampler_ptr, llama_sampler_init_dist(cfg.seed));
         }
+
+        self.sampler = Some(sampler);
+        Ok(())
     }
 }
 
 impl Drop for LlamaPipeline {
     fn drop(&mut self) {
-        if !self.sampler.is_null() {
-            unsafe { llama_sampler_free(self.sampler) };
-            self.sampler = std::ptr::null_mut();
-        }
         if !self.mtmd_ctx.is_null() {
             unsafe { mtmd_free(self.mtmd_ctx) };
             self.mtmd_ctx = std::ptr::null_mut();
