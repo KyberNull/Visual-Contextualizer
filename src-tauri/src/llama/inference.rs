@@ -1,3 +1,6 @@
+use tauri::AppHandle;
+use tauri:: Emitter;
+
 use crate::llama::template;
 use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
@@ -71,7 +74,7 @@ impl Default for GenerationConfig {
             top_p: 0.8,
             min_p: 0.0,
             temperature: 0.7,
-            seed: 0,
+            seed: 6,
             presence_penalty: 1.5,
             repitition_penalty: 1.0,
         }
@@ -129,7 +132,7 @@ impl LlamaPipeline {
             sampler,
         })
     }
-    pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig) -> Result<String, String> {
+    pub fn generate(&mut self, prompt: &str, cfg: &GenerationConfig, app: AppHandle) -> Result<String, String> {
 
         // Clear old context
         unsafe { llama_memory_clear(llama_get_memory(self.ctx), true) };
@@ -189,6 +192,7 @@ impl LlamaPipeline {
         let mut out = String::new();
         let mut last_pos = (n_prompt - 1) as i32;
         let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
+        let mut word_buffer = String::new();
         for _ in 0..cfg.max_tokens {
 
             // sample next token from logits of last position
@@ -197,7 +201,25 @@ impl LlamaPipeline {
                 break;
             }
 
-            out.push_str(&self.model.token_to_piece(token)?);
+
+            let piece = &self.model.token_to_piece(token)?;
+            out.push_str(piece);
+
+            println!("{}", piece);
+        
+
+            word_buffer.push_str(&piece);
+
+            if let Some((_before, _after)) = word_buffer.split_once(' ') {
+
+                while let Some((before, after)) = word_buffer.split_once(' ') {
+                    let completed_word = format!("{} ", before);
+                    word_buffer = after.to_string();
+                    let _ = app.emit("got_a_word", completed_word);
+                }
+            
+            }
+
 
             unsafe { llama_sampler_accept(self.sampler, token) };
 
@@ -228,6 +250,10 @@ impl LlamaPipeline {
 
         }
 
+        if !word_buffer.is_empty()
+        {
+            let _ = app.emit("got_a_word", word_buffer);
+        }
         Ok(out)
     }
 
