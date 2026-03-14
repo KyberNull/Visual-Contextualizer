@@ -26,6 +26,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 piper-rs = "0.1.9"
 rodio = { version = "0.22.2", features = ["playback"] }
+num_cpus = "1.16"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

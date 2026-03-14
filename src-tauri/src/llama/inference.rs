@@ -6,6 +6,7 @@ use crate::llama::bindings::*;
 use crate::llama::model::LlamaModel;
 use std::env;
 use std::ffi::CString;
+use num_cpus;
 
 // Structs are made to mirror the C structs in llama.h, but with more Rusty ergonomics where possible. 
 // They have default values but let us overwrite them when needed.
@@ -47,9 +48,9 @@ pub struct ContextConfig {
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            n_ctx: 4096,
+            n_ctx: 1024,
             n_batch: 512, // TODO: make it choose the batch size based on the cpu
-            n_threads: 6, //TODO: make it choose the number of threads based on the system
+            n_threads: num_cpus::get() as i32,
         }
     }
 }
@@ -112,7 +113,7 @@ impl LlamaPipeline {
         cparams.n_batch = cfg.n_batch;
         cparams.n_ubatch = cfg.n_batch;
         cparams.n_threads = cfg.n_threads;
-        cparams.n_threads_batch = cfg.n_threads;
+        cparams.n_threads_batch = (cfg.n_threads / 2).max(4);;
         cparams.kv_unified = true;
         cparams.n_seq_max = 4;
 

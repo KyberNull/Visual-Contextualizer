@@ -8,17 +8,17 @@ async function resizeImageTo1024x1024(file) {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      canvas.width = 768;
-      canvas.height = 768;
+      canvas.width = 448;
+      canvas.height = 448;
       
-      // Calculate scaling to fit inside 768x768 while maintaining aspect ratio
-      const scale = Math.min(768 / img.width, 768 / img.height);
+      // Calculate scaling to fit inside 448x448 while maintaining aspect ratio
+      const scale = Math.min(448 / img.width, 448 / img.height);
       const scaledWidth = img.width * scale;
       const scaledHeight = img.height * scale;
       
       // Center the image
-      const x = (768 - scaledWidth) / 2;
-      const y = (768 - scaledHeight) / 2;
+      const x = (448 - scaledWidth) / 2;
+      const y = (448 - scaledHeight) / 2;
       
       ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
       
