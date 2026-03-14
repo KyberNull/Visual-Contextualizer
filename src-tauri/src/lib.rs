@@ -13,7 +13,6 @@ use std::io::Cursor;
 use std::thread;
 use std::time::Duration;
 use std::path::Path;
-use std::fs;
 use std::env;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -21,32 +20,32 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Listener, LogicalSize, Manager, Size, State};
 
 
+//Takes the screenshot of the entire screen
 #[tauri::command]
 async fn get_full_screenshot_bytes() -> Result<Vec<u8>, String> {
-    let screens = Screen::all().map_err(|e| e.to_string())?;
-
-    let screen = screens
-        .first()
-        .ok_or_else(|| "No screens found".to_string())?;
+    let screen = Screen::all()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next()
+        .ok_or("No screens found")?;
     let image = screen.capture().map_err(|e| e.to_string())?;
-    
-    let mut buffer = Cursor::new(Vec::new());
-    image.write_to(&mut buffer, ImageFormat::Png)
+    let mut bytes: Vec<u8> = Vec::new();
+    image.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
         .map_err(|e| e.to_string())?;
-    
-    Ok(buffer.into_inner())
+    Ok(bytes)
 }
+
 
 #[tauri::command]
 async fn capture_hidden_window_screenshot(window: tauri::Window) -> Result<Vec<u8>, String> {
-    // 1. Hide the window to capture what's behind it
+
+    //MInimizes the window and takes a screenshot of the entire screen
     window
         .minimize()
         .map_err(|e| format!("Failed to minimize window: {}", e))?;
-
-    // Give the OS compositor time to hide the app window
     thread::sleep(Duration::from_millis(250));
 
+    //Saves the capture of the image
     let capture_result = (|| -> Result<Vec<u8>, String> {
         let screens = Screen::all().map_err(|e| e.to_string())?;
         let screen = screens
@@ -61,47 +60,42 @@ async fn capture_hidden_window_screenshot(window: tauri::Window) -> Result<Vec<u
         Ok(buffer.into_inner())
     })();
 
-    // 2. THE FIX: If capture worked, prepare for Snipping mode
+
+    //Capture screenshot loop logic
     if capture_result.is_ok() {
-        // Unminimize so it's active again
         let _ = window.unminimize();
-        // Go Fullscreen so the canvas covers the whole monitor
         let _ = window.set_fullscreen(true);
-        // Set Always on Top so the snip tool isn't covered by other windows
         let _ = window.set_always_on_top(true);
         let _ = window.set_focus();
     } else {
-        // Fallback if capture failed
         let _ = window.unminimize();
         let _ = window.maximize();
     }
-
     capture_result
 }
 
+//Resest the tauri window the initial size after the fullscreening  to snip
 #[tauri::command]
 fn reset_window_to_initial_size(window: tauri::Window) -> Result<(), String> {
     let _ = window.unminimize();
     let _ = window.unmaximize();
     let _ = window.set_fullscreen(false);
     let _ = window.set_always_on_top(false);
-
     window
         .set_size(Size::Logical(LogicalSize::new(400.0, 600.0)))
         .map_err(|e| format!("Failed to resize window: {}", e))?;
-
     let _ = window.center();
     let _ = window.set_focus();
     Ok(())
 }
 
 
+//Sets the Tauri app window to full screen
 #[tauri::command]
 fn set_fullscreen(window: tauri::Window, is_fullscreen: bool) -> Result<(), String> {
     window
         .set_fullscreen(is_fullscreen)
         .map_err(|e| format!("Failed to set fullscreen: {}", e))?;
-    // In a snip tool, we usually want the window on top of everything
     if is_fullscreen {
         window
             .set_always_on_top(true)
@@ -115,22 +109,7 @@ fn set_fullscreen(window: tauri::Window, is_fullscreen: bool) -> Result<(), Stri
 }
 
 
-#[tauri::command]
-fn get_img(data: Vec<u8>) -> Result<String, String> {
-    let path = "dot.png";
-
-    match fs::write(path, data) {
-        Ok(_) => {
-            println!("Successfully saved image");
-            Ok(format!("Successfully saved images"))
-        }
-        Err(e) => {
-            eprintln!("The error gotten is {}", e);
-            Err(format!("The error gotten is {}", e))
-        }
-    }
-}
-
+//Keeps track of the main runtimes and objects which need to stay alive for the entire apps runtime
 struct AppState {
     _runtime: LlamaRuntime, // owns llama backend, lives for app lifetime
     pipeline: Mutex<LlamaPipeline>, // pipeline is the real workhorse
@@ -140,6 +119,7 @@ struct AppState {
     _mixer_sink: rodio::MixerDeviceSink,
 }
 
+//Implimentations on AppState
 impl AppState {
     fn new() -> Result<Self, String> {
         // Initialises the GGML Backends and Kernels
@@ -158,7 +138,7 @@ impl AppState {
 
         println!("Model loaded successfully");
         
-
+        //Loads the neccessary objects for Piper for TTS
         let mixer_sink = DeviceSinkBuilder::open_default_sink()
             .map_err(|e| format!("Audio Device Error: {}", e))?;
         let player = Player::connect_new(mixer_sink.mixer());
@@ -188,6 +168,7 @@ struct WordPayload {
 }
 
 
+//Function that implements TTS
 pub fn setup_voice_engine(app : &AppHandle){
 
     let handle = app.clone();
@@ -201,6 +182,7 @@ pub fn setup_voice_engine(app : &AppHandle){
 
         let is_end = word.contains('.') || word.contains('?') || word.contains('!');
 
+        //If more than 5 words in the queue emit them and comvert them to speech.
         if queue.len() >= 5 || is_end {
             let text_to_speak = queue.join(" ");
             queue.clear();
@@ -210,12 +192,11 @@ pub fn setup_voice_engine(app : &AppHandle){
                 return;
             }
 
-
             let state = handle.state::<crate::AppState>();
             let synth = Arc::clone(&state.synth);
             let player_lock = Arc::clone(&state.audio_player);
 
-
+            //Spwan another thread to not slow down the UI
             std::thread::spawn(move || {
                 if let Ok(audio_result) = synth.synthesize_parallel(text_to_speak, None) {
                     let mut samples = Vec::new();
@@ -232,16 +213,10 @@ pub fn setup_voice_engine(app : &AppHandle){
                     if let Ok(player) = player_lock.lock() {
                         player.append(source);
                     }
-
-
-
                 }
             });
-
         }
-
     });
-
 }
 
 
@@ -299,7 +274,6 @@ pub fn run() {
             capture_hidden_window_screenshot,
             reset_window_to_initial_size,
             set_fullscreen,
-            get_img,
         ])
         .setup(|app| {
             // Pass the handle to our separate function
