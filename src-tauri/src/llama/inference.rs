@@ -11,7 +11,7 @@ use crate::llama::model::LlamaModel;
 
 // TODO: make mlock() true based on available ram
 
-const SYSTEM_PROMPT: &str = ""; /*"You are a visual accessibility assistant.
+const SYSTEM_PROMPT: &str = "You are a visual accessibility assistant.
 
 Your job is to explain what is happening in the given image to a visually impaired user.
 
@@ -36,7 +36,7 @@ Ignore colors, styling, or decorative UI elements unless they matter.
 Do not output bullet points, headings, or numbered lists.
 Write 3-4 sentences in normal conversational language.
 Be descriptive but concise.
-Do not guess details that are not visible."; */
+Do not guess details that are not visible.";
 
 pub struct ContextConfig {
     pub n_ctx: u32,
@@ -150,12 +150,13 @@ impl LlamaPipeline {
 
         let prompt = [system_prompt, user_prompt];
         let formatted_prompt = template::render(&prompt);
-        let prompt_tokens = self.model.tokenize(&formatted_prompt, true)?;
+        let prompt_tokens = self.model.tokenize(&formatted_prompt, false)?;
         if prompt_tokens.is_empty() {
             return Err("Prompt tokenization produced no tokens".to_string());
         }
 
         let n_prompt = prompt_tokens.len();
+        let stop_seq = "<|endoftext|><|im_start|>assistant";
         let eos = self.model.eos_token();
 
 
@@ -193,20 +194,29 @@ impl LlamaPipeline {
         let mut last_pos = (n_prompt - 1) as i32;
         let mut token = unsafe { llama_sampler_sample(self.sampler, self.ctx, last_pos )};
         let mut word_buffer = String::new();
+        
         for _ in 0..cfg.max_tokens {
-
             // sample next token from logits of last position
 
             if token == eos {
                 break;
             }
 
-
             let piece = &self.model.token_to_piece(token)?;
             out.push_str(piece);
-        
 
             word_buffer.push_str(&piece);
+
+            // Check if stop sequence appeared
+            if let Some(idx) = out.find(stop_seq) {
+                out.truncate(idx); // remove the stop sequence and anything after
+                
+                // Calculate how many characters from the end of word_buffer to remove
+                if let Some(wb_idx) = word_buffer.rfind(stop_seq) {
+                    word_buffer.truncate(wb_idx);
+                }
+                break;
+            }
 
             if let Some((_before, _after)) = word_buffer.split_once(' ') {
 
