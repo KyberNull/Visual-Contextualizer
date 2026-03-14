@@ -18,6 +18,7 @@ fn main() {
 
     // Link the files
     println!("cargo:rustc-link-search=native={}", dst.join("lib").display());
+    println!("cargo:rustc-link-search=native={}", dst.join("lib64").display());
     println!("cargo:rustc-link-lib=llama");
     println!("cargo:rustc-link-lib=mtmd");
 

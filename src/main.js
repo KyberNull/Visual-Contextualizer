@@ -2,6 +2,39 @@ const { invoke } = window.__TAURI__.core;
 const { register } = window.__TAURI__.globalShortcut;
 const {listen} = window.__TAURI__.event;
 
+async function resizeImageTo1024x1024(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = 768;
+      canvas.height = 768;
+      
+      // Calculate scaling to fit inside 768x768 while maintaining aspect ratio
+      const scale = Math.min(768 / img.width, 768 / img.height);
+      const scaledWidth = img.width * scale;
+      const scaledHeight = img.height * scale;
+      
+      // Center the image
+      const x = (768 - scaledWidth) / 2;
+      const y = (768 - scaledHeight) / 2;
+      
+      ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+      
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to create blob'));
+        }
+      }, 'image/jpeg', 0.9);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 function ensureHighlightSpan(textContainer) {
   if (!textContainer) return null;
   let highlighted = textContainer.querySelector(".highlighted_word");
@@ -26,8 +59,11 @@ async function handleImageUploadToRust(file)
 
 
   try{
-    const arrayBuffer = await file.arrayBuffer();
-    const uintArray  = new Uint8Array(arrayBuffer);
+    // Resize image to 1024x1024 using Canvas
+    const resizedBlob = await resizeImageTo1024x1024(file);
+    const arrayBuffer = await resizedBlob.arrayBuffer();
+    
+    const uintArray = new Uint8Array(arrayBuffer);
     const imageBytes = Array.from(uintArray);
 
 

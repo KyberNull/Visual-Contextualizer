@@ -71,11 +71,11 @@ impl Default for GenerationConfig {
         Self {
             max_tokens: 100,
             top_k: 20,
-            top_p: 0.8,
+            top_p: 0.95,
             min_p: 0.0,
-            temperature: 0.7,
+            temperature: 0.6,
             seed: 6,
-            presence_penalty: 1.5,
+            presence_penalty: 0.0,
             repitition_penalty: 1.0,
         }
     }
