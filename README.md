@@ -41,6 +41,38 @@ Visual Contextualizer combines Rust performance, Tauri portability, and vanilla 
 4. Now run `./run.sh` in the unzipped folder.
 5. This should start the app, now `Ctrl + Shift + N` can be used to take screenshots on your desktop.
 
+## If there's audio issues
+
+Run the following
+
+### Debian based distros
+
+```sh
+sudo apt update
+sudo apt install -y libasound2-plugins pulseaudio-utils
+```
+
+### Fedora based distros
+
+```sh
+sudo dnf install -y alsa-plugins-pulseaudio pulseaudio-utils alsa-utils
+```
+
+### Common for both
+
+```sh
+cat <<'EOF' > ~/.asoundrc
+pcm.!default {
+  type pulse
+}
+ctl.!default {
+  type pulse
+}
+EOF
+```
+
+Restart after done.
+
 # TODOs
 
 - [ ] Add support for linking against BLAS libraries for faster matrix operations in llama.cpp.
