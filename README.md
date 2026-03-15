@@ -35,9 +35,11 @@ Visual Contextualizer combines Rust performance, Tauri portability, and vanilla 
 
 # Installation Guide
 
-1. Go to the releases of this repository and download the latest version for your operating system. (Currently it only works on Linux, we can compile it for Windows if you want)
-
-2. Extract the downloaded archive and run the executable file inside. (On Linux, you may need to give it execute permissions first with `chmod +x <filename>`)
+1. Go to the releases of this repository and download the latest version for your operating system. (Currently it is released only for Linux, we can compile it for Windows if you want)
+2. Extract the downloaded archive and install the .`deb`/`.rpm` (using the `dpkg` / `rpm` command) file inside.
+3. Then do `chmod +x` on `run.sh`.
+4. Now run `./run.sh` in the unzipped folder.
+5. This should start the app, now `Ctrl + Shift + N` can be used to take screenshots on your desktop.
 
 # TODOs
 
