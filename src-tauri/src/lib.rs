@@ -1,24 +1,25 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod llama;
 
-use crate::llama::inference::{resolve_dependency_path, ContextConfig, GenerationConfig, LlamaPipeline, LlamaRuntime};
+use crate::llama::inference::{
+    resolve_dependency_path, ContextConfig, GenerationConfig, LlamaPipeline, LlamaRuntime,
+};
 use crate::llama::model::LlamaModel;
 use piper_rs::synth::PiperSpeechSynthesizer;
 use rodio::{buffer::SamplesBuffer, DeviceSinkBuilder, Player};
-use std::num::NonZeroU16;
-use screenshots::Screen;
 use screenshots::image::ImageFormat;
+use screenshots::Screen;
 use serde::Serialize;
-use std::io::Cursor;
-use std::thread;
-use std::time::Duration;
-use std::path::Path;
 use std::env;
+use std::io::Cursor;
+use std::num::NonZeroU16;
 use std::num::NonZeroU32;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Listener, LogicalSize, Manager, Size, State};
-
 
 //Takes the screenshot of the entire screen
 #[tauri::command]
@@ -30,15 +31,14 @@ async fn get_full_screenshot_bytes() -> Result<Vec<u8>, String> {
         .ok_or("No screens found")?;
     let image = screen.capture().map_err(|e| e.to_string())?;
     let mut bytes: Vec<u8> = Vec::new();
-    image.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+    image
+        .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
         .map_err(|e| e.to_string())?;
     Ok(bytes)
 }
 
-
 #[tauri::command]
 async fn capture_hidden_window_screenshot(window: tauri::Window) -> Result<Vec<u8>, String> {
-
     //MInimizes the window and takes a screenshot of the entire screen
     window
         .minimize()
@@ -59,7 +59,6 @@ async fn capture_hidden_window_screenshot(window: tauri::Window) -> Result<Vec<u
             .map_err(|e| e.to_string())?;
         Ok(buffer.into_inner())
     })();
-
 
     //Capture screenshot loop logic
     if capture_result.is_ok() {
@@ -89,7 +88,6 @@ fn reset_window_to_initial_size(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
-
 //Sets the Tauri app window to full screen
 #[tauri::command]
 fn set_fullscreen(window: tauri::Window, is_fullscreen: bool) -> Result<(), String> {
@@ -108,10 +106,9 @@ fn set_fullscreen(window: tauri::Window, is_fullscreen: bool) -> Result<(), Stri
     Ok(())
 }
 
-
 //Keeps track of the main runtimes and objects which need to stay alive for the entire apps runtime
 struct AppState {
-    _runtime: LlamaRuntime, // owns llama backend, lives for app lifetime
+    _runtime: LlamaRuntime,         // owns llama backend, lives for app lifetime
     pipeline: Mutex<LlamaPipeline>, // pipeline is the real workhorse
 
     synth: Arc<PiperSpeechSynthesizer>,
@@ -137,18 +134,24 @@ impl AppState {
         let pipeline = LlamaPipeline::from_model(model, &cfg)?;
 
         println!("Model loaded successfully");
-        
+
         //Loads the neccessary objects for Piper for TTS
         let mixer_sink = DeviceSinkBuilder::open_default_sink()
             .map_err(|e| format!("Audio Device Error: {}", e))?;
         let player = Player::connect_new(mixer_sink.mixer());
 
-        let config_path = env::current_dir().unwrap().join("en_US-libritts_r-medium.onnx.json");
-        let piper_model = piper_rs::from_config_path(&config_path)
-            .map_err(|e| e.to_string())?;
-    
-        let synth = PiperSpeechSynthesizer::new(piper_model)
-            .map_err(|e| e.to_string())?;
+        let config_path = resolve_dependency_path(Path::new("en_US-libritts_r-medium.onnx.json"))?;
+
+        let espeak_data_dir = resolve_dependency_path(Path::new("espeak-ng-data"))
+            .map_err(|_| "Failed to find `espeak-ng-data` folder. Make sure it is bundled next to the executable!".to_string())?;
+
+        if let Some(parent) = espeak_data_dir.parent() {
+            env::set_var("PIPER_ESPEAKNG_DATA_DIRECTORY", parent.to_str().unwrap());
+        }
+
+        let piper_model = piper_rs::from_config_path(&config_path).map_err(|e| e.to_string())?;
+
+        let synth = PiperSpeechSynthesizer::new(piper_model).map_err(|e| e.to_string())?;
 
         Ok(Self {
             _runtime,
@@ -156,27 +159,23 @@ impl AppState {
             synth: Arc::new(synth),
             audio_player: Arc::new(Mutex::new(player)),
             _mixer_sink: mixer_sink,
-
         })
     }
 }
-
 
 #[derive(Clone, Serialize)]
 struct WordPayload {
     word: String,
 }
 
-
 //Function that implements TTS
-pub fn setup_voice_engine(app : &AppHandle){
-
+pub fn setup_voice_engine(app: &AppHandle) {
     let handle = app.clone();
     let word_queue = Arc::new(Mutex::new(Vec::<String>::new()));
 
     app.listen("got_a_word", move |event| {
         let word: String = serde_json::from_str(event.payload()).unwrap_or_default();
-        
+
         let mut queue = word_queue.lock().unwrap();
         queue.push(word.clone());
 
@@ -187,7 +186,12 @@ pub fn setup_voice_engine(app : &AppHandle){
             let text_to_speak = queue.join(" ");
             queue.clear();
 
-            if let Err(err) = handle.emit("tts_word", WordPayload { word: text_to_speak.clone() }) {
+            if let Err(err) = handle.emit(
+                "tts_word",
+                WordPayload {
+                    word: text_to_speak.clone(),
+                },
+            ) {
                 eprintln!("Failed to emit tts_word event: {}", err);
                 return;
             }
@@ -219,53 +223,47 @@ pub fn setup_voice_engine(app : &AppHandle){
     });
 }
 
-
-
-
-
-
 #[tauri::command]
-async fn generate_text(state: State<'_ , AppState>, prompt: String,image_bytes:Vec<u8>, app : AppHandle) -> Result<String, String> {
-
+async fn generate_text(
+    state: State<'_, AppState>,
+    prompt: String,
+    image_bytes: Vec<u8>,
+    app: AppHandle,
+) -> Result<String, String> {
     let app_handle = app.clone();
 
-    let res = tauri::async_runtime::spawn_blocking(move ||{
-            let app_handle2 = app_handle.clone();
-            let state = app_handle.state::<AppState>();
-            let mut pipeline = state
-                .pipeline
-                .lock()
-                .map_err(|_| "Failed to lock pipeline".to_string())?;
-    
-            let cfg = GenerationConfig::default();
-    
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        let app_handle2 = app_handle.clone();
+        let state = app_handle.state::<AppState>();
+        let mut pipeline = state
+            .pipeline
+            .lock()
+            .map_err(|_| "Failed to lock pipeline".to_string())?;
 
-            let image_data = if image_bytes.is_empty() {
-                None
-            } else {
-                Some(image_bytes)
-            };
+        let cfg = GenerationConfig::default();
 
+        let image_data = if image_bytes.is_empty() {
+            None
+        } else {
+            Some(image_bytes)
+        };
 
-            //println!("Generating text for prompt: {}", prompt);
-    
-            pipeline.generate(&prompt, image_data, &cfg, app_handle2)
-    
-        }).await.map_err(|e| e.to_string())?;
-    
-    res 
+        //println!("Generating text for prompt: {}", prompt);
+
+        pipeline.generate(&prompt, image_data, &cfg, app_handle2)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    res
 }
-
-
-
-
 
 // Initialise App Stae which loads llama.cpp backend and model, and creates the pipeline.
 // App State exists throughout the entire app lifetime (automatically manages memory).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState::new().unwrap())// TODO: Handle errors properly later.
+        .manage(AppState::new().unwrap()) // TODO: Handle errors properly later.
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
